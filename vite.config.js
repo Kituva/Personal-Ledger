@@ -2,7 +2,12 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 
+// GitHub Pages serves a project repo from a subpath, not the domain root.
+// Everything the PWA references absolutely has to carry this prefix.
+const base = "/Personal-Ledger/";
+
 export default defineConfig({
+  base,
   plugins: [
     react(),
     VitePWA({
@@ -12,18 +17,18 @@ export default defineConfig({
         name: "Ledger",
         short_name: "Ledger",
         description: "Track what you spend.",
-        start_url: "/",
-        scope: "/",
+        start_url: base,
+        scope: base,
         display: "standalone",
         orientation: "portrait",
         background_color: "#14161F",
         theme_color: "#14161F",
         lang: "en-IN",
         icons: [
-          { src: "/icon-192.png", sizes: "192x192", type: "image/png" },
-          { src: "/icon-512.png", sizes: "512x512", type: "image/png" },
+          { src: `${base}icon-192.png`, sizes: "192x192", type: "image/png" },
+          { src: `${base}icon-512.png`, sizes: "512x512", type: "image/png" },
           {
-            src: "/icon-maskable-512.png",
+            src: `${base}icon-maskable-512.png`,
             sizes: "512x512",
             type: "image/png",
             purpose: "maskable",
@@ -32,7 +37,7 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ["**/*.{js,css,html,png,woff2}"],
-        navigateFallback: "/index.html",
+        navigateFallback: `${base}index.html`,
         runtimeCaching: [
           {
             // Fonts are the only network request the app makes. Cache them so
