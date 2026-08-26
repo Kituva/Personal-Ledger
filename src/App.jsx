@@ -447,8 +447,11 @@ function sample() {
    into place with stroke-dashoffset. The gap is subtracted from every
    arc's length so round caps don't overlap their neighbours.
    ============================================================ */
-const D_R = 78;
+const D_R = 89;
+const D_SW = 11;
 const D_C = 2 * Math.PI * D_R;
+const D_GAP = 3.5;  // ~a third of the stroke, as in the reference ring
+const D_OTHER = "#7c8899";  // literal: SVG attributes don't read CSS vars
 
 function Donut({ slices, onSlice, children }) {
   const [lit, setLit] = useState(false);
@@ -467,17 +470,29 @@ function Donut({ slices, onSlice, children }) {
           <circle cx="100" cy="100" r={D_R} fill="none" stroke="var(--surface2)" strokeWidth="18" />
         )}
         {total > 0 && slices.map((s) => {
-          const frac = s.v / total;
-          // A lone slice has no neighbour to clear, so it keeps its full ring.
-          const len = slices.length === 1 ? D_C : Math.max(2, frac * D_C - 9);
-          const offset = -acc * D_C;
-          acc += frac;
+          const span = (s.v / total) * D_C;
+          const start = acc;
+          acc += span;
+
+          // A round cap paints half the stroke width beyond each end of the
+          // dash. Ignore that and a slice thinner than the stroke renders
+          // wider than its share and laps its neighbour, so give the caps
+          // their room — and drop to butt caps on slices too thin to afford
+          // it. A lone slice has no neighbour to clear and keeps the ring.
+          const only = slices.length === 1;
+          const round = !only && span > D_SW + D_GAP + 1;
+          const len = only ? D_C
+            : round ? span - D_GAP - D_SW
+            : Math.max(1, span - D_GAP);
+          const lead = only ? 0 : D_GAP / 2 + (round ? D_SW / 2 : 0);
+
           return (
             <circle key={s.id} className="arc" cx="100" cy="100" r={D_R} fill="none"
-              stroke={s.c} strokeWidth="18" strokeLinecap={slices.length === 1 ? "butt" : "round"}
+              stroke={s.c} strokeWidth={D_SW} strokeLinecap={round ? "round" : "butt"}
               strokeDasharray={lit ? `${len} ${D_C}` : `0 ${D_C}`}
-              strokeDashoffset={offset}
-              onClick={() => onSlice?.(s.id)} />
+              strokeDashoffset={-(start + lead)}
+              style={s.other ? { cursor: "default" } : undefined}
+              onClick={() => !s.other && onSlice?.(s.id)} />
           );
         })}
       </svg>
@@ -697,7 +712,18 @@ function Summary({ f, cur, prevTotal, onPick, onDrill }) {
     return Object.entries(m).sort((a, b) => b[1].v - a[1].v);
   }, [cur]);
 
-  const slices = byCat.map(([id, x]) => ({ id, v: x.v, c: CAT[id]?.c }));
+  const slices = useMemo(() => {
+    // A slice needs a dash body at least as long as the stroke is thick
+    // before it reads as an arc: any shorter and its two round caps meet,
+    // painting a dot. Everything below that folds into one aggregate.
+    const min = total * ((2 * D_SW + D_GAP) / D_C);
+    const out = byCat.filter(([, x]) => x.v >= min).map(([id, x]) => ({ id, v: x.v, c: CAT[id]?.c }));
+    const tail = byCat.filter(([, x]) => x.v < min);
+    if (tail.length) {
+      out.push({ id: "__other", v: tail.reduce((a, [, x]) => a + x.v, 0), c: D_OTHER, other: true });
+    }
+    return out;
+  }, [byCat, total]);
   const noun = f.kind === "expense" ? "Expenses" : "Income";
 
   return (
