@@ -3,25 +3,35 @@ import * as db from "./db.js";
 
 /* ============================================================
    Categories
+
+   The ids and names are load-bearing: db.js stores `cat: <id>` on every
+   transaction and the CSV importer matches on the name. Only the colour
+   and the emoji are new.
    ============================================================ */
 export const CATS = [
-  { id: "dining", name: "Dining Out", c: "#C89B3C" },
-  { id: "groceries", name: "Groceries", c: "#7FA05A" },
-  { id: "transport", name: "Transportation", c: "#5B8FB0" },
-  { id: "subs", name: "Subscriptions", c: "#9B7BB5" },
-  { id: "utilities", name: "Utilities", c: "#C2795A" },
-  { id: "home", name: "Home", c: "#6F7690" },
-  { id: "ent", name: "Entertainment", c: "#CE7F9E" },
-  { id: "health", name: "Health/medical", c: "#5FA394" },
-  { id: "travel", name: "Travel", c: "#D9A441" },
-  { id: "personal", name: "Personal", c: "#A88BC7" },
-  { id: "gifts", name: "Gifts/Donations", c: "#C96A6A" },
-  { id: "invest", name: "Investments", c: "#4E9D7B" },
-  { id: "debt", name: "Debt", c: "#B5563F" },
-  { id: "misc", name: "Miscellaneous", c: "#7C8296" },
+  { id: "dining", name: "Dining Out", e: "🍽️", c: "#22a7ff" },
+  { id: "groceries", name: "Groceries", e: "🛒", c: "#f4555f" },
+  { id: "transport", name: "Transportation", e: "🚗", c: "#7c5cff" },
+  { id: "subs", name: "Subscriptions", e: "🔁", c: "#a855f7" },
+  { id: "utilities", name: "Utilities", e: "💡", c: "#f7c948" },
+  { id: "home", name: "Home", e: "🏠", c: "#ff5fa2" },
+  { id: "ent", name: "Entertainment", e: "🎬", c: "#f08a4b" },
+  { id: "health", name: "Health/medical", e: "💊", c: "#2ecc9b" },
+  { id: "travel", name: "Travel", e: "✈️", c: "#38bdf8" },
+  { id: "personal", name: "Personal", e: "🧴", c: "#c084fc" },
+  { id: "gifts", name: "Gifts/Donations", e: "🎁", c: "#fb7185" },
+  { id: "invest", name: "Investments", e: "📈", c: "#4ade80" },
+  { id: "debt", name: "Debt", e: "💳", c: "#ef4444" },
+  { id: "misc", name: "Miscellaneous", e: "📦", c: "#94a3b8" },
 ];
 const CAT = Object.fromEntries(CATS.map((c) => [c.id, c]));
 const BY_NAME = Object.fromEntries(CATS.map((c) => [c.name.toLowerCase(), c.id]));
+
+/** A category's colour at low alpha, for the tile behind its emoji. */
+const tint = (hex, a = 0.16) => {
+  const n = parseInt(String(hex).slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+};
 
 /* ============================================================
    Dates and formatting
@@ -30,9 +40,19 @@ const pad = (n) => String(n).padStart(2, "0");
 const iso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const parseISO = (s) => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+const MON = MONTHS.map((m) => m.slice(0, 3));
 const DOW = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const money = (n) => Math.round(Math.abs(n)).toLocaleString("en-IN");
 const uid = () => `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+
+/** Axis labels, in the units people actually say here: k, L, Cr. */
+function compact(n) {
+  n = Math.round(Math.abs(n));
+  if (n >= 1e7) return (n / 1e7).toFixed(n >= 1e8 ? 0 : 1).replace(/\.0$/, "") + "Cr";
+  if (n >= 1e5) return (n / 1e5).toFixed(n >= 1e6 ? 0 : 1).replace(/\.0$/, "") + "L";
+  if (n >= 1000) return Math.round(n / 1000) + "k";
+  return String(n);
+}
 
 function relDay(dstr) {
   const t = iso(new Date());
@@ -41,7 +61,257 @@ function relDay(dstr) {
   if (dstr === iso(y)) return "Yesterday";
   const d = parseISO(dstr);
   const sameYear = d.getFullYear() === new Date().getFullYear();
-  return `${DOW[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()].slice(0, 3)}${sameYear ? "" : " " + d.getFullYear()}`;
+  return `${MONTHS[d.getMonth()]} ${d.getDate()}${sameYear ? "" : ", " + d.getFullYear()}`;
+}
+
+/* ============================================================
+   Periods
+
+   One range function drives every screen. The filter pill picks the
+   grain, the chevrons step through it, and both charts and totals read
+   from the same window — so Summary and Entries can never disagree.
+   ============================================================ */
+const PERIODS = [["w","Weekly"],["m","Monthly"],["q","Quarterly"],["y","Yearly"]];
+
+const endOfDay = (d) => { const x = new Date(d); x.setHours(23, 59, 59, 999); return x; };
+
+function startOfWeek(d) {
+  const x = new Date(d); x.setHours(0, 0, 0, 0);
+  x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); // weeks start Monday
+  return x;
+}
+
+function periodRange(p, off) {
+  const now = new Date();
+
+  if (p === "w") {
+    const s = startOfWeek(now); s.setDate(s.getDate() + off * 7);
+    const e = new Date(s); e.setDate(e.getDate() + 6);
+    const ps = new Date(s); ps.setDate(ps.getDate() - 7);
+    const pe = new Date(s); pe.setDate(pe.getDate() - 1);
+    return {
+      start: s, end: endOfDay(e), prevStart: ps, prevEnd: endOfDay(pe),
+      title: off === 0 ? "This week" : `${s.getDate()} ${MON[s.getMonth()]} – ${e.getDate()} ${MON[e.getMonth()]}`,
+      label: off === 0 ? "this week" : "that week",
+      from: "last week",
+    };
+  }
+
+  if (p === "m") {
+    const s = new Date(now.getFullYear(), now.getMonth() + off, 1);
+    const e = new Date(s.getFullYear(), s.getMonth() + 1, 0);
+    const ps = new Date(s.getFullYear(), s.getMonth() - 1, 1);
+    const pe = new Date(s.getFullYear(), s.getMonth(), 0);
+    return {
+      start: s, end: endOfDay(e), prevStart: ps, prevEnd: endOfDay(pe),
+      title: `${MONTHS[s.getMonth()]} ${s.getFullYear()}`,
+      label: off === 0 ? "this month" : `in ${MON[s.getMonth()]}`,
+      from: MON[ps.getMonth()],
+    };
+  }
+
+  if (p === "q") {
+    const s = new Date(now.getFullYear(), (Math.floor(now.getMonth() / 3) + off) * 3, 1);
+    const e = new Date(s.getFullYear(), s.getMonth() + 3, 0);
+    const ps = new Date(s.getFullYear(), s.getMonth() - 3, 1);
+    const pe = new Date(s.getFullYear(), s.getMonth(), 0);
+    return {
+      start: s, end: endOfDay(e), prevStart: ps, prevEnd: endOfDay(pe),
+      title: `Q${Math.floor(s.getMonth() / 3) + 1} ${s.getFullYear()}`,
+      label: off === 0 ? "this quarter" : `in Q${Math.floor(s.getMonth() / 3) + 1}`,
+      from: `Q${Math.floor(ps.getMonth() / 3) + 1}`,
+    };
+  }
+
+  const s = new Date(now.getFullYear() + off, 0, 1);
+  return {
+    start: s, end: endOfDay(new Date(s.getFullYear(), 11, 31)),
+    prevStart: new Date(s.getFullYear() - 1, 0, 1),
+    prevEnd: endOfDay(new Date(s.getFullYear() - 1, 11, 31)),
+    title: String(s.getFullYear()),
+    label: off === 0 ? "this year" : `in ${s.getFullYear()}`,
+    from: String(s.getFullYear() - 1),
+  };
+}
+
+/**
+ * Buckets a period into chart columns, each carrying the ISO range it
+ * covers so tapping a bar can filter the list underneath it.
+ */
+function bucketize(p, range, list) {
+  const { start, end } = range;
+  const out = [];
+
+  if (p === "w" || p === "m") {
+    const n = p === "w" ? 7 : end.getDate();
+    for (let i = 0; i < n; i++) {
+      const d = new Date(start); d.setDate(d.getDate() + i);
+      const k = iso(d);
+      out.push({ v: 0, from: k, to: k,
+        label: p === "w" ? DOW[d.getDay()][0]
+          : [1, 7, 14, 21, 28, n].includes(i + 1) ? String(i + 1) : "" });
+    }
+    const first = iso(start);
+    list.forEach((t) => {
+      const i = Math.round((parseISO(t.date) - parseISO(first)) / 864e5);
+      if (i >= 0 && i < n) out[i].v += t.amount;
+    });
+    return out;
+  }
+
+  if (p === "q") {
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 7)) {
+      const a = new Date(d);
+      const b = new Date(d); b.setDate(b.getDate() + 6);
+      out.push({ v: 0, from: iso(a), to: iso(b > end ? end : b),
+        label: a.getDate() <= 7 ? MON[a.getMonth()] : "" });
+    }
+    list.forEach((t) => {
+      const b = out.find((x) => t.date >= x.from && t.date <= x.to);
+      if (b) b.v += t.amount;
+    });
+    return out;
+  }
+
+  for (let m = 0; m < 12; m++) {
+    const a = new Date(start.getFullYear(), m, 1);
+    const b = new Date(start.getFullYear(), m + 1, 0);
+    out.push({ v: 0, from: iso(a), to: iso(b), label: m % 2 === 0 ? MON[m] : "" });
+  }
+  list.forEach((t) => { out[parseISO(t.date).getMonth()].v += t.amount; });
+  return out;
+}
+
+/* ============================================================
+   Icons
+
+   Drawn rather than typed. A text "<" sits on the font's math axis and
+   "⋯" on the baseline, so neither lands in the optical centre of a round
+   button no matter how it's centred — the browser centres the glyph's
+   box, not the mark inside it.
+   ============================================================ */
+const svg = (props) => ({
+  viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2.1,
+  strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true, ...props,
+});
+
+const Chevron = ({ dir, size = 17 }) => (
+  <svg {...svg({ width: size, height: size })}>
+    <polyline points={
+      dir === "left" ? "15 5 9 12 15 19"
+        : dir === "down" ? "5 9 12 15 19 9"
+        : "9 5 15 12 9 19"} />
+  </svg>
+);
+
+const Arrow = ({ up }) => (
+  <svg {...svg({ width: 13, height: 13, strokeWidth: 2.6 })}>
+    {up ? <><line x1="12" y1="19.5" x2="12" y2="5" /><polyline points="7 10.5 12 5 17 10.5" /></>
+      : <><line x1="12" y1="4.5" x2="12" y2="19" /><polyline points="7 13.5 12 19 17 13.5" /></>}
+  </svg>
+);
+
+const Plus = () => (
+  <svg {...svg({ width: 24, height: 24, strokeWidth: 2.4 })}>
+    <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+  </svg>
+);
+
+const PieIcon = () => (
+  <svg {...svg({ width: 19, height: 19 })}>
+    <path d="M21 15.6A9 9 0 1 1 8.4 3v9h9a9 9 0 0 1 3.6 3.6z" /><path d="M21.5 10A9 9 0 0 0 14 2.5V10z" />
+  </svg>
+);
+
+const ListIcon = () => (
+  <svg {...svg({ width: 19, height: 19 })}>
+    <rect x="4" y="3" width="16" height="18" rx="2.5" />
+    <line x1="8" y1="9" x2="16" y2="9" /><line x1="8" y1="14" x2="13" y2="14" />
+  </svg>
+);
+
+const GearIcon = () => (
+  <svg {...svg({ width: 19, height: 19 })}>
+    <circle cx="12" cy="12" r="3.2" />
+    <path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 7.9 19.4l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.6 1.6 0 0 0 3 15a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.1-2.7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.6 1.6 0 0 0 9 3.1V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.6 1.6 0 0 0 21 9a2 2 0 1 1 0 4z" />
+  </svg>
+);
+
+const Backspace = () => (
+  <svg {...svg({ width: 19, height: 19, strokeWidth: 1.9 })}>
+    <path d="M21 5H8.5L2 12l6.5 7H21a1.6 1.6 0 0 0 1.6-1.6V6.6A1.6 1.6 0 0 0 21 5z" />
+    <line x1="12" y1="9.5" x2="17" y2="14.5" /><line x1="17" y1="9.5" x2="12" y2="14.5" />
+  </svg>
+);
+
+const GridIcon = () => (
+  <svg {...svg({ width: 19, height: 19, strokeWidth: 2.4 })}>
+    <circle cx="8.5" cy="8.5" r="2" /><circle cx="15.5" cy="8.5" r="2" />
+    <circle cx="8.5" cy="15.5" r="2" /><circle cx="15.5" cy="15.5" r="2" />
+  </svg>
+);
+
+const Reset = () => (
+  <svg {...svg({ width: 18, height: 18 })}>
+    <polyline points="20 6 20 11 15 11" />
+    <path d="M19.4 15a8 8 0 1 1-1.6-8.4L20 9" />
+  </svg>
+);
+
+const Check = () => (
+  <svg {...svg({ width: 20, height: 20, strokeWidth: 2.6 })}><polyline points="4 12.5 9.5 18 20 6.5" /></svg>
+);
+
+const Trash = () => (
+  <svg {...svg({ width: 18, height: 18 })}>
+    <polyline points="4 6.5 20 6.5" /><path d="M9 6.5V4.5h6v2" />
+    <path d="M6.5 6.5 7.4 20a1.5 1.5 0 0 0 1.5 1.4h6.2a1.5 1.5 0 0 0 1.5-1.4l.9-13.5" />
+    <line x1="10" y1="10.5" x2="10" y2="17.5" /><line x1="14" y1="10.5" x2="14" y2="17.5" />
+  </svg>
+);
+
+const Close = () => (
+  <svg {...svg({ width: 18, height: 18, strokeWidth: 2.4 })}>
+    <line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" />
+  </svg>
+);
+
+/* ============================================================
+   Count-up
+
+   Eases a number toward its target so the total rolls instead of
+   snapping when you page between months. Reduced-motion jumps straight
+   to the value.
+   ============================================================ */
+function useCountUp(target, ms = 450) {
+  const [val, setVal] = useState(target);
+  const from = useRef(target);
+  const raf = useRef(0);
+
+  useEffect(() => {
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+    if (reduce || from.current === target) {
+      from.current = target;
+      setVal(target);
+      return;
+    }
+    const start = performance.now();
+    const a = from.current;
+    const step = (now) => {
+      // rAF hands back the frame's start time, which can predate `start`.
+      // Without the lower clamp p goes negative and the ease overshoots
+      // past the value it began from.
+      const p = Math.min(1, Math.max(0, (now - start) / ms));
+      const eased = 1 - Math.pow(1 - p, 3);
+      setVal(a + (target - a) * eased);
+      if (p < 1) raf.current = requestAnimationFrame(step);
+      else from.current = target;
+    };
+    raf.current = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf.current);
+  }, [target, ms]);
+
+  return val;
 }
 
 /* ============================================================
@@ -171,512 +441,390 @@ function sample() {
 }
 
 /* ============================================================
-   App
-   ============================================================ */
-export default function App() {
-  const [txns, setTxns] = useState([]);
-  const [ready, setReady] = useState(false);
-  const [error, setError] = useState(null);
-  const [tab, setTab] = useState("home");
-  const [editing, setEditing] = useState(null);
-  const [settings, setSettings] = useState(false);
-  const [monthOff, setMonthOff] = useState(0);
-  const [selDay, setSelDay] = useState(null);
+   Donut
 
+   Arcs are one circle each, sized with stroke-dasharray and rotated
+   into place with stroke-dashoffset. The gap is subtracted from every
+   arc's length so round caps don't overlap their neighbours.
+   ============================================================ */
+const D_R = 78;
+const D_C = 2 * Math.PI * D_R;
+
+function Donut({ slices, onSlice, children }) {
+  const [lit, setLit] = useState(false);
   useEffect(() => {
-    db.getAll()
-      .then((rows) => {
-        rows.sort((a, b) => b.date.localeCompare(a.date));
-        setTxns(rows);
-      })
-      .catch((e) => setError(e.message || "Couldn't open the database."))
-      .finally(() => setReady(true));
+    const id = requestAnimationFrame(() => setLit(true));
+    return () => cancelAnimationFrame(id);
   }, []);
 
-  // Categories ranked by how often you use them — most of the speed of
-  // manual entry is the picker already showing your usual few.
-  const catOrder = useMemo(() => {
-    const n = {};
-    txns.forEach((t) => { n[t.cat] = (n[t.cat] || 0) + 1; });
-    return [...CATS].sort((a, b) => (n[b.id] || 0) - (n[a.id] || 0));
-  }, [txns]);
-
-  const save = async (t) => {
-    const rec = t.id ? t : { ...t, id: uid() };
-    setTxns((p) => {
-      const next = t.id ? p.map((x) => (x.id === t.id ? rec : x)) : [rec, ...p];
-      return next.sort((a, b) => b.date.localeCompare(a.date));
-    });
-    setEditing(null);
-    try { await db.put(rec); } catch (e) { setError("Save failed. Your change may not survive a reload."); }
-  };
-
-  const remove = async (id) => {
-    setTxns((p) => p.filter((t) => t.id !== id));
-    setEditing(null);
-    try { await db.remove(id); } catch { setError("Delete failed."); }
-  };
-
-  const replaceAll = async (rows) => {
-    setTxns([...rows].sort((a, b) => b.date.localeCompare(a.date)));
-    try { await db.clear(); if (rows.length) await db.bulkPut(rows); }
-    catch { setError("Couldn't write to the database."); }
-  };
-
-  const addMany = async (rows) => {
-    setTxns((p) => [...p, ...rows].sort((a, b) => b.date.localeCompare(a.date)));
-    try { await db.bulkPut(rows); } catch { setError("Import didn't fully save."); }
-  };
-
-  if (!ready) {
-    return <div className="lg"><div className="scroll"><div className="eyebrow">Loading</div></div></div>;
-  }
+  const total = slices.reduce((s, x) => s + x.v, 0);
+  let acc = 0;
 
   return (
-    <div className="lg">
-      {error && (
-        <div style={{ background: "var(--rust)", color: "#14161F", padding: "10px 18px", fontSize: 13 }}
-          onClick={() => setError(null)} role="alert">
-          {error} — tap to dismiss
-        </div>
-      )}
-
-      {tab === "home" && <Home txns={txns} off={monthOff} setOff={setMonthOff} selDay={selDay}
-        setSelDay={setSelDay} onTap={setEditing} onSettings={() => setSettings(true)} />}
-      {tab === "insights" && <Insights txns={txns} />}
-      {tab === "log" && <Log txns={txns} onTap={setEditing} />}
-
-      <nav className="tabbar">
-        <button className={`tab ${tab === "home" ? "on" : ""}`} onClick={() => setTab("home")}>Month</button>
-        <button className={`tab ${tab === "insights" ? "on" : ""}`} onClick={() => setTab("insights")}>Insights</button>
-        <button className="fab" onClick={() => setEditing({})} aria-label="Add transaction">+</button>
-        <button className={`tab ${tab === "log" ? "on" : ""}`} onClick={() => setTab("log")}>Log</button>
-        <div className="tab" style={{ opacity: 0, pointerEvents: "none" }} aria-hidden>·</div>
-      </nav>
-
-      {editing && <EntrySheet txn={editing} cats={catOrder} onSave={save}
-        onDelete={remove} onClose={() => setEditing(null)} />}
-      {settings && <Settings txns={txns} onClose={() => setSettings(false)}
-        onReplace={replaceAll} onAdd={addMany} />}
+    <div className="donutwrap">
+      <svg viewBox="0 0 200 200" role="img" aria-label="Spending by category">
+        {total === 0 && (
+          <circle cx="100" cy="100" r={D_R} fill="none" stroke="var(--surface2)" strokeWidth="18" />
+        )}
+        {total > 0 && slices.map((s) => {
+          const frac = s.v / total;
+          // A lone slice has no neighbour to clear, so it keeps its full ring.
+          const len = slices.length === 1 ? D_C : Math.max(2, frac * D_C - 9);
+          const offset = -acc * D_C;
+          acc += frac;
+          return (
+            <circle key={s.id} className="arc" cx="100" cy="100" r={D_R} fill="none"
+              stroke={s.c} strokeWidth="18" strokeLinecap={slices.length === 1 ? "butt" : "round"}
+              strokeDasharray={lit ? `${len} ${D_C}` : `0 ${D_C}`}
+              strokeDashoffset={offset}
+              onClick={() => onSlice?.(s.id)} />
+          );
+        })}
+      </svg>
+      <div className="donutmid">{children}</div>
     </div>
   );
 }
 
 /* ============================================================
-   Month
+   Bar chart
+
+   The ghost track behind each bar keeps the shape of the period
+   visible — without it a half-spent month reads as a ragged skyline
+   with no sense of how much of it is still to come.
    ============================================================ */
-function Home({ txns, off, setOff, selDay, setSelDay, onTap, onSettings }) {
-  const base = new Date(); base.setDate(1); base.setMonth(base.getMonth() + off);
-  const yr = base.getFullYear(), mo = base.getMonth();
-  const days = new Date(yr, mo + 1, 0).getDate();
-  const todayIso = iso(new Date());
-
-  const inMonth = useMemo(() => txns.filter((t) => {
-    const d = parseISO(t.date); return d.getFullYear() === yr && d.getMonth() === mo;
-  }), [txns, yr, mo]);
-
-  const spent = inMonth.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
-  const earned = inMonth.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
-
-  const prev = useMemo(() => {
-    const p = new Date(yr, mo - 1, 1);
-    return txns.filter((t) => { const d = parseISO(t.date);
-      return t.type === "expense" && d.getFullYear() === p.getFullYear() && d.getMonth() === p.getMonth();
-    }).reduce((s, t) => s + t.amount, 0);
-  }, [txns, yr, mo]);
-  const delta = prev ? Math.round(((spent - prev) / prev) * 100) : null;
-
-  const byDay = useMemo(() => {
-    const m = Array(days).fill(0);
-    inMonth.filter((t) => t.type === "expense")
-      .forEach((t) => { m[parseISO(t.date).getDate() - 1] += t.amount; });
-    return m;
-  }, [inMonth, days]);
-  const peak = Math.max(...byDay, 1);
-
-  const byCat = useMemo(() => {
-    const m = {};
-    inMonth.filter((t) => t.type === "expense").forEach((t) => { m[t.cat] = (m[t.cat] || 0) + t.amount; });
-    return Object.entries(m).sort((a, b) => b[1] - a[1]);
-  }, [inMonth]);
-
-  const dayTxns = selDay ? inMonth.filter((t) => t.date === selDay) : [];
+function Bars({ buckets, avg, colour = "var(--text)", sel, onSel, height = 150 }) {
+  const peak = Math.max(...buckets.map((b) => b.v), 1);
+  const avgY = avg > 0 ? Math.min(height, (avg / peak) * height) : null;
 
   return (
-    <div className="scroll">
-      <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 22 }}>
-        <button className="eyebrow" onClick={() => { setOff(off - 1); setSelDay(null); }}
-          style={{ padding: "6px 10px 6px 0" }} aria-label="Previous month">←</button>
-        <div className="eyebrow">{MONTHS[mo]} {yr}</div>
-        <div style={{ display: "flex", gap: 4 }}>
-          <button className="eyebrow" onClick={() => { if (off < 0) { setOff(off + 1); setSelDay(null); } }}
-            style={{ padding: "6px 8px", opacity: off < 0 ? 1 : 0.25 }} aria-label="Next month">→</button>
-          <button className="eyebrow" onClick={onSettings} style={{ padding: "6px 0 6px 6px" }} aria-label="Settings">⋯</button>
-        </div>
-      </header>
-
-      {txns.length === 0 ? (
-        <div style={{ padding: "70px 0", textAlign: "center" }}>
-          <div className="mono" style={{ fontSize: 34, color: "var(--dim)" }}><span className="rupee">₹</span>0</div>
-          <div style={{ fontSize: 13.5, color: "var(--muted)", marginTop: 14, lineHeight: 1.6 }}>
-            Nothing logged yet.<br />Tap + to add your first spend, or import a CSV from Settings.
-          </div>
-        </div>
-      ) : (
-        <>
-          <div className="mono" style={{ fontSize: 42, letterSpacing: "-.02em", lineHeight: 1 }}>
-            <span className="rupee">₹</span>{money(spent)}
-          </div>
-          <div style={{ display: "flex", gap: 14, alignItems: "baseline", marginTop: 8, marginBottom: 26, fontSize: 12.5, color: "var(--muted)" }}>
-            {delta !== null && (
-              <span style={{ color: delta > 0 ? "var(--rust)" : "var(--teal)" }}>
-                {delta > 0 ? "↑" : "↓"} {Math.abs(delta)}% vs {MONTHS[(mo + 11) % 12].slice(0, 3)}
-              </span>
-            )}
-            {earned > 0 && <span>in <span className="mono" style={{ color: "var(--teal)" }}>₹{money(earned)}</span></span>}
-          </div>
-
-          <section style={{ marginBottom: 30 }}>
-            <div className="eyebrow" style={{ marginBottom: 11 }}>Daily rhythm</div>
-            <div className="rhythm">
-              {byDay.map((v, i) => {
-                const dIso = `${yr}-${pad(mo + 1)}-${pad(i + 1)}`;
-                const dow = new Date(yr, mo, i + 1).getDay();
-                const we = dow === 0 || dow === 6;
-                return (
-                  <button key={i}
-                    className={`rbar ${we ? "we" : ""} ${dIso === todayIso ? "today" : ""} ${selDay === dIso ? "sel" : ""} ${dIso > todayIso ? "future" : ""}`}
-                    style={{ height: v ? Math.max(4, (v / peak) * 76) : 2 }}
-                    onClick={() => setSelDay(selDay === dIso ? null : dIso)}
-                    aria-label={`${i + 1} ${MONTHS[mo]}, ${money(v)} rupees`} />
-                );
-              })}
-            </div>
-            <div className="mono" style={{ display: "flex", justifyContent: "space-between", fontSize: 9.5, color: "var(--dim)", marginTop: 7 }}>
-              <span>1</span><span>{Math.round(days / 2)}</span><span>{days}</span>
-            </div>
-            <div style={{ marginTop: 9, fontSize: 11, color: "var(--dim)" }}>Brass bars are weekends · tap any day</div>
-          </section>
-
-          {selDay && (
-            <section className="card" style={{ padding: "13px 15px", marginBottom: 26 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                <div className="eyebrow">{relDay(selDay)}</div>
-                <button className="eyebrow" onClick={() => setSelDay(null)}>close</button>
-              </div>
-              {dayTxns.length === 0
-                ? <div style={{ fontSize: 13, color: "var(--dim)", padding: "6px 0" }}>Nothing logged.</div>
-                : dayTxns.map((t) => <TxnRow key={t.id} t={t} onTap={onTap} />)}
-            </section>
-          )}
-
-          <section style={{ marginBottom: 30 }}>
-            <div className="eyebrow" style={{ marginBottom: 8 }}>Where it went</div>
-            {byCat.length === 0
-              ? <div style={{ fontSize: 13, color: "var(--dim)" }}>No spending this month yet.</div>
-              : byCat.slice(0, 7).map(([id, v]) => <CatBar key={id} id={id} v={v} max={byCat[0][1]} />)}
-          </section>
-
-          <section>
-            <div className="eyebrow" style={{ marginBottom: 4 }}>Recent</div>
-            {inMonth.slice(0, 8).map((t) => <TxnRow key={t.id} t={t} onTap={onTap} showDate />)}
-          </section>
-        </>
-      )}
-    </div>
-  );
-}
-
-function CatBar({ id, v, max, pct }) {
-  return (
-    <div className="catrow">
-      <div style={{ width: 108, fontSize: 12.5, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{CAT[id]?.name}</div>
-      <div className="cattrack"><div className="catfill" style={{ width: `${(v / max) * 100}%`, background: CAT[id]?.c }} /></div>
-      <div className="mono" style={{ width: pct !== undefined ? 46 : 62, textAlign: "right", fontSize: 12.5 }}>{money(v)}</div>
-      {pct !== undefined && <div className="mono" style={{ width: 32, textAlign: "right", fontSize: 11, color: "var(--dim)" }}>{pct}%</div>}
-    </div>
-  );
-}
-
-function TxnRow({ t, onTap, showDate }) {
-  const c = CAT[t.cat];
-  return (
-    <div className="txn" onClick={() => onTap && onTap(t)} style={{ cursor: onTap ? "pointer" : "default" }}>
-      <div className="dot" style={{ background: t.type === "income" ? "var(--teal)" : c?.c }} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.note || c?.name}</div>
-        <div style={{ fontSize: 11, color: "var(--dim)", marginTop: 2 }}>
-          {c?.name}{showDate ? ` · ${relDay(t.date)}` : ""}
-        </div>
-      </div>
-      <div className="mono" style={{ fontSize: 14, color: t.type === "income" ? "var(--teal)" : "var(--paper)" }}>
-        {t.type === "income" ? "+" : ""}{money(t.amount)}
-      </div>
-    </div>
-  );
-}
-
-/* ============================================================
-   Insights
-   ============================================================ */
-const PERIODS = [["w","Week"],["m","Month"],["q","Quarter"],["y","Year"]];
-
-function Insights({ txns }) {
-  const [p, setP] = useState("m");
-
-  const { cur, prev, buckets, label, span } = useMemo(() => {
-    const now = new Date();
-    const span = { w: 7, m: 30, q: 91, y: 365 }[p];
-    const start = new Date(now); start.setDate(start.getDate() - span + 1);
-    const pStart = new Date(start); pStart.setDate(pStart.getDate() - span);
-    const exp = txns.filter((t) => t.type === "expense");
-    const between = (t, a, b) => { const d = parseISO(t.date); return d >= a && d <= b; };
-    const cur = exp.filter((t) => between(t, start, now));
-    const prev = exp.filter((t) => between(t, pStart, start));
-    const nB = { w: 7, m: 10, q: 13, y: 12 }[p];
-    const per = span / nB;
-    const buckets = Array(nB).fill(0);
-    cur.forEach((t) => {
-      const off = Math.floor((parseISO(t.date) - start) / 86400000);
-      buckets[Math.min(nB - 1, Math.max(0, Math.floor(off / per)))] += t.amount;
-    });
-    return { cur, prev, buckets, span,
-      label: { w: "last 7 days", m: "last 30 days", q: "last 13 weeks", y: "last 12 months" }[p] };
-  }, [txns, p]);
-
-  const total = cur.reduce((s, t) => s + t.amount, 0);
-  const pTotal = prev.reduce((s, t) => s + t.amount, 0);
-  const delta = pTotal ? Math.round(((total - pTotal) / pTotal) * 100) : null;
-  const peak = Math.max(...buckets, 1);
-
-  const byCat = useMemo(() => {
-    const m = {};
-    cur.forEach((t) => { m[t.cat] = (m[t.cat] || 0) + t.amount; });
-    return Object.entries(m).sort((a, b) => b[1] - a[1]);
-  }, [cur]);
-
-  return (
-    <div className="scroll">
-      <div className="eyebrow" style={{ marginBottom: 14 }}>Insights</div>
-      <div className="seg" style={{ marginBottom: 24 }}>
-        {PERIODS.map(([k, n]) => (
-          <button key={k} className={`segbtn ${p === k ? "on" : ""}`} onClick={() => setP(k)}>{n}</button>
-        ))}
-      </div>
-
-      <div className="mono" style={{ fontSize: 38, letterSpacing: "-.02em", lineHeight: 1 }}>
-        <span className="rupee">₹</span>{money(total)}
-      </div>
-      <div style={{ display: "flex", gap: 14, marginTop: 8, marginBottom: 26, fontSize: 12.5, color: "var(--muted)" }}>
-        <span>{label}</span>
-        {delta !== null && <span style={{ color: delta > 0 ? "var(--rust)" : "var(--teal)" }}>{delta > 0 ? "↑" : "↓"} {Math.abs(delta)}%</span>}
-        <span><span className="mono">₹{money(Math.round(total / span))}</span>/day</span>
-      </div>
-
-      <section style={{ marginBottom: 32 }}>
-        <div className="eyebrow" style={{ marginBottom: 11 }}>Trend</div>
-        <div className="rhythm" style={{ height: 90, gap: 4 }}>
-          {buckets.map((v, i) => (
-            <div key={i} className="rbar" style={{ height: Math.max(3, (v / peak) * 90),
-              background: i === buckets.length - 1 ? "var(--brass)" : "var(--dim)" }} />
-          ))}
-        </div>
-      </section>
-
-      <section style={{ marginBottom: 32 }}>
-        <div className="eyebrow" style={{ marginBottom: 8 }}>By category</div>
-        {byCat.length === 0
-          ? <div style={{ fontSize: 13, color: "var(--dim)" }}>Nothing in this period.</div>
-          : byCat.map(([id, v]) => <CatBar key={id} id={id} v={v} max={byCat[0][1]} pct={Math.round((v / total) * 100)} />)}
-      </section>
-
-      <section>
-        <div className="eyebrow" style={{ marginBottom: 4 }}>Biggest single spends</div>
-        {[...cur].sort((a, b) => b.amount - a.amount).slice(0, 5).map((t) => (
-          <TxnRow key={t.id} t={t} showDate />
-        ))}
-      </section>
-    </div>
-  );
-}
-
-/* ============================================================
-   Log
-   ============================================================ */
-function Log({ txns, onTap }) {
-  const [q, setQ] = useState("");
-  const [cats, setCats] = useState([]);
-
-  const grouped = useMemo(() => {
-    const s = q.trim().toLowerCase();
-    const f = txns.filter((t) =>
-      (!s || (t.note || "").toLowerCase().includes(s) || CAT[t.cat]?.name.toLowerCase().includes(s)) &&
-      (cats.length === 0 || cats.includes(t.cat)));
-    const m = {};
-    f.forEach((t) => { (m[t.date] ||= []).push(t); });
-    return Object.entries(m).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 120);
-  }, [txns, q, cats]);
-
-  const toggle = (id) => setCats((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id]);
-
-  return (
-    <div className="scroll">
-      <div className="eyebrow" style={{ marginBottom: 14 }}>Log</div>
-      <input className="inp" placeholder="Search notes and categories" value={q}
-        onChange={(e) => setQ(e.target.value)} style={{ marginBottom: 12 }} />
-      <div className="hscroll" style={{ paddingBottom: 4, marginBottom: 20 }}>
-        {CATS.map((c) => (
-          <button key={c.id} className={`chip ${cats.includes(c.id) ? "on" : ""}`}
-            style={{ color: cats.includes(c.id) ? c.c : "var(--muted)" }} onClick={() => toggle(c.id)}>
-            {c.name}
-          </button>
-        ))}
-      </div>
-      {grouped.length === 0 && <div style={{ fontSize: 13, color: "var(--dim)" }}>Nothing matches. Try a different search.</div>}
-      {grouped.map(([date, list]) => (
-        <section key={date} style={{ marginBottom: 20 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
-            <div className="eyebrow">{relDay(date)}</div>
-            <div className="mono eyebrow">₹{money(list.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0))}</div>
-          </div>
-          {list.map((t) => <TxnRow key={t.id} t={t} onTap={onTap} />)}
-        </section>
-      ))}
-    </div>
-  );
-}
-
-/* ============================================================
-   Category picker
-
-   A closed field that opens into a two-column grid of all fourteen.
-   Deliberately not a native <select>: on iOS that's a wheel picker,
-   which costs a scroll and a Done tap. This stays one tap.
-   ============================================================ */
-function CategorySelect({ cats, value, onChange }) {
-  const [open, setOpen] = useState(false);
-  const sel = CAT[value];
-
-  useEffect(() => {
-    if (!open) return;
-    const esc = (e) => e.key === "Escape" && setOpen(false);
-    window.addEventListener("keydown", esc);
-    return () => window.removeEventListener("keydown", esc);
-  }, [open]);
-
-  return (
-    <div className="selwrap">
-      {open && <div className="backdrop" onClick={() => setOpen(false)} />}
-
-      <button className={`select ${open ? "open" : ""}`} onClick={() => setOpen(!open)}
-        aria-haspopup="listbox" aria-expanded={open}>
-        <span className="dot" style={{ background: sel?.c, width: 9, height: 9 }} />
-        <span>{sel?.name}</span>
-        <span className="chev">▼</span>
-      </button>
-
-      {open && (
-        <div className="dropdown" role="listbox">
-          {cats.map((c) => (
-            <button key={c.id} className={`opt ${c.id === value ? "on" : ""}`}
-              role="option" aria-selected={c.id === value}
-              onClick={() => { onChange(c.id); setOpen(false); }}>
-              <span className="dot" style={{ background: c.c, width: 8, height: 8 }} />
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</span>
+    <>
+      <div className="chart" style={{ height }}>
+        <div className="bars">
+          {buckets.map((b, i) => (
+            <button key={b.from}
+              className={`slot ${sel === i ? "sel" : ""} ${sel !== null && sel !== i ? "dim" : ""}`}
+              onClick={() => onSel?.(sel === i ? null : i)}
+              aria-label={`${b.from}, ${money(b.v)} rupees`}>
+              <span className="bar" style={{
+                height: b.v ? Math.max(4, (b.v / peak) * height) : 0,
+                background: colour,
+                transitionDelay: `${Math.min(i * 8, 220)}ms`,
+              }} />
             </button>
           ))}
         </div>
+        {avgY !== null && <div className="avgline" style={{ bottom: avgY }} />}
+        <div className="yaxis">
+          <span style={{ top: 0 }} className="num">{compact(peak)}</span>
+          {avgY !== null && avgY > 18 && avgY < height - 18 && (
+            <span className="mid num" style={{ bottom: avgY }}>{compact(avg)}</span>
+          )}
+          <span style={{ bottom: 0 }} className="num">0</span>
+        </div>
+      </div>
+      <div className="xaxis">
+        {buckets.map((b) => <span key={b.from}>{b.label}</span>)}
+      </div>
+    </>
+  );
+}
+
+/* ============================================================
+   Filter pills
+   ============================================================ */
+function Filters({ f, onPick, showCat = true }) {
+  const cat = f.catFilter ? CAT[f.catFilter] : null;
+  return (
+    <div className="pills">
+      <button className="pill" onClick={() => f.setKind(f.kind === "expense" ? "income" : "expense")}>
+        {f.kind === "expense" ? "Expenses" : "Income"}
+      </button>
+      <button className="pill" onClick={() => onPick("period")}>
+        {PERIODS.find(([k]) => k === f.period)[1]}
+        <span className="pchev"><Chevron dir="down" size={14} /></span>
+      </button>
+      {showCat && (
+        <button className={`pill ${cat ? "on" : ""}`} onClick={() => onPick("cat")}>
+          {cat ? `${cat.e} ${cat.name}` : "All categories"}
+          <span className="pchev"><Chevron dir="down" size={14} /></span>
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** A bottom sheet of options — what each filter pill opens. */
+function PickerSheet({ title, options, value, onPick, onClose }) {
+  useEffect(() => {
+    const esc = (e) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, [onClose]);
+
+  return (
+    <div className="sheet" style={{ top: "auto", maxHeight: "72vh" }}>
+      <div className="grab" />
+      <div className="sheettop" style={{ paddingBottom: 12 }}>
+        <span style={{ fontSize: 17, fontWeight: 600 }}>{title}</span>
+        <button className="iconbtn" onClick={onClose} aria-label="Close"><Close /></button>
+      </div>
+      <div style={{ overflowY: "auto", padding: "0 16px calc(20px + env(safe-area-inset-bottom))" }}>
+        <div className="setcard">
+          {options.map((o) => (
+            <button key={String(o.id)} className="row" onClick={() => { onPick(o.id); onClose(); }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 11 }}>
+                {o.e && (
+                  <span className="tile sm" style={{ color: o.c, background: tint(o.c) }}>{o.e}</span>
+                )}
+                {o.name}
+              </span>
+              {o.id === value && <Check />}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   Rows
+   ============================================================ */
+function Delta({ pct, from, goodDown = true }) {
+  if (pct === null || pct === 0) return null;
+  const good = goodDown ? pct < 0 : pct > 0;
+  const c = good ? "var(--pos)" : "var(--neg)";
+  return (
+    <div className="delta" style={{ color: c }}>
+      <span className="darrow" style={{ background: c }}><Arrow up={pct > 0} /></span>
+      <span className="num">{Math.abs(pct)}%</span>
+      <span className="dfrom">from {from}</span>
+    </div>
+  );
+}
+
+function CatRow({ id, v, n, pct, onTap }) {
+  const c = CAT[id];
+  return (
+    <button className="catrow" onClick={() => onTap?.(id)}>
+      <span className="tile" style={{ color: c?.c, background: tint(c?.c) }}>{c?.e}</span>
+      <span style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8 }}>
+        <span className="catname">{c?.name}</span>
+        <span className="count num">{n}</span>
+      </span>
+      <span className="num" style={{ fontSize: 15.5, fontWeight: 600 }}>₹{money(v)}</span>
+      <span className="pct num">{pct}%</span>
+    </button>
+  );
+}
+
+function TxnRow({ t, onTap, hideCat }) {
+  const c = CAT[t.cat];
+  return (
+    <button className="txn" onClick={() => onTap?.(t)}>
+      <span className="tile sm" style={{ color: c?.c, background: tint(c?.c) }}>{c?.e}</span>
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span className="txnname" style={{ display: "block" }}>{t.note || c?.name}</span>
+        {t.note && !hideCat ? <span className="txnsub" style={{ display: "block" }}>{c?.name}</span> : null}
+      </span>
+      <span className="txnamt num" style={{ color: t.type === "income" ? "var(--pos)" : "var(--text)" }}>
+        {t.type === "income" ? "+" : ""}₹{money(t.amount)}
+      </span>
+    </button>
+  );
+}
+
+function DayGroups({ list, onTap, hideCat, limit = 120, empty = "Nothing here yet." }) {
+  const groups = useMemo(() => {
+    const m = {};
+    list.forEach((t) => { (m[t.date] ||= []).push(t); });
+    return Object.entries(m).sort((a, b) => b[0].localeCompare(a[0])).slice(0, limit);
+  }, [list, limit]);
+
+  if (!groups.length) return <div className="empty">{empty}</div>;
+
+  return (
+    <>
+      {groups.map(([date, rows]) => (
+        <div key={date}>
+          <div className="dayhead">
+            <span>{relDay(date)}</span>
+            <span className="num">₹{money(rows.reduce((s, t) => s + t.amount, 0))}</span>
+          </div>
+          <div className="daycard">
+            {rows.map((t) => <TxnRow key={t.id} t={t} onTap={onTap} hideCat={hideCat} />)}
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
+/** ‹ March 2026 › — the period stepper every screen shares. */
+function PeriodNav({ f, right }) {
+  return (
+    <div className="navrow">
+      <button className="iconbtn" onClick={() => f.setOff(f.off - 1)} aria-label="Previous period">
+        <Chevron dir="left" />
+      </button>
+      <span className="navtitle">{f.range.title}</span>
+      <span style={{ display: "flex", gap: 8 }}>
+        <button className="iconbtn" disabled={f.off >= 0} onClick={() => f.off < 0 && f.setOff(f.off + 1)}
+          aria-label="Next period">
+          <Chevron dir="right" />
+        </button>
+        {right}
+      </span>
+    </div>
+  );
+}
+
+/* ============================================================
+   Summary
+   ============================================================ */
+function Summary({ f, cur, prevTotal, onPick, onDrill }) {
+  const total = cur.reduce((s, t) => s + t.amount, 0);
+  const shown = useCountUp(total);
+  const delta = prevTotal ? Math.round(((total - prevTotal) / prevTotal) * 100) : null;
+
+  const byCat = useMemo(() => {
+    const m = {};
+    cur.forEach((t) => {
+      const e = (m[t.cat] ||= { v: 0, n: 0 });
+      e.v += t.amount; e.n++;
+    });
+    return Object.entries(m).sort((a, b) => b[1].v - a[1].v);
+  }, [cur]);
+
+  const slices = byCat.map(([id, x]) => ({ id, v: x.v, c: CAT[id]?.c }));
+  const noun = f.kind === "expense" ? "Expenses" : "Income";
+
+  return (
+    <div className="scroll">
+      <PeriodNav f={f} />
+
+      <Donut slices={slices} onSlice={onDrill}>
+        <span className="slabel">{noun} {f.range.label}</span>
+        <span className="stotal num" style={{ fontSize: 38 }}>₹{money(shown)}</span>
+        <Delta pct={delta} from={f.range.from} goodDown={f.kind === "expense"} />
+      </Donut>
+
+      <Filters f={f} onPick={onPick} />
+
+      {byCat.length === 0 ? (
+        <div className="empty">
+          Nothing logged {f.range.label}.<br />
+          Tap + to add your first entry, or import a CSV from Settings.
+        </div>
+      ) : (
+        byCat.map(([id, x]) => (
+          <CatRow key={id} id={id} v={x.v} n={x.n}
+            pct={((x.v / total) * 100).toFixed(2)} onTap={onDrill} />
+        ))
       )}
     </div>
   );
 }
 
 /* ============================================================
-   Entry sheet — add and edit
+   Entries
    ============================================================ */
-function EntrySheet({ txn, cats, onSave, onDelete, onClose }) {
-  const isEdit = Boolean(txn.id);
-  const [amt, setAmt] = useState(isEdit ? String(txn.amount) : "");
-  const [type, setType] = useState(txn.type || "expense");
-  const [cat, setCat] = useState(txn.cat || cats[0]?.id || "dining");
-  const [note, setNote] = useState(txn.note || "");
-  const [date, setDate] = useState(txn.date || iso(new Date()));
-  const [confirmDel, setConfirmDel] = useState(false);
+function Entries({ f, cur, onPick, onTap }) {
+  const [sel, setSel] = useState(null);
+  const buckets = useMemo(() => bucketize(f.period, f.range, cur), [f.period, f.range, cur]);
 
-  const tap = (k) => {
-    if (k === "del") return setAmt((a) => a.slice(0, -1));
-    if (k === "." && amt.includes(".")) return;
-    if (amt.includes(".") && amt.split(".")[1]?.length >= 2) return;
-    if (amt.replace(".", "").length >= 8) return;
-    setAmt((a) => (a === "0" && k !== "." ? k : a + k));
-  };
+  // Reset the bar selection whenever the window underneath it changes.
+  useEffect(() => { setSel(null); }, [f.period, f.off, f.kind, f.catFilter]);
 
-  const valid = parseFloat(amt) > 0;
-  const submit = () => {
-    if (!valid) return;
-    onSave({ ...(isEdit ? txn : {}), amount: parseFloat(amt), type, cat, note: note.trim(), date });
-  };
+  const total = cur.reduce((s, t) => s + t.amount, 0);
+  const shown = useCountUp(total);
 
-  const chips = [0, 1, 2].map((o) => { const d = new Date(); d.setDate(d.getDate() - o); return iso(d); });
-  if (!chips.includes(date)) chips.push(date);
+  // Mean across elapsed buckets only — counting days that haven't happened
+  // yet would drag the line down and make every month look thrifty.
+  const today = iso(new Date());
+  const elapsed = buckets.filter((b) => b.from <= today);
+  const avg = elapsed.length ? elapsed.reduce((s, b) => s + b.v, 0) / elapsed.length : 0;
+
+  const list = sel === null
+    ? cur
+    : cur.filter((t) => t.date >= buckets[sel].from && t.date <= buckets[sel].to);
 
   return (
-    <div className="sheet">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 18px 6px" }}>
-        <button className="eyebrow" onClick={onClose}>Cancel</button>
-        <div className="seg" style={{ width: 168 }}>
-          <button className={`segbtn ${type === "expense" ? "on" : ""}`} onClick={() => setType("expense")}>Spent</button>
-          <button className={`segbtn ${type === "income" ? "on" : ""}`} onClick={() => setType("income")}>Received</button>
-        </div>
-        <button className="eyebrow" onClick={submit} style={{ color: valid ? "var(--brass)" : "var(--dim)" }}>Save</button>
+    <div className="scroll">
+      <PeriodNav f={f} />
+
+      <div className="shead">
+        <div className="slabel">{f.kind === "expense" ? "Expenses" : "Income"} {f.range.label}</div>
+        <div className="stotal num">₹{money(shown)}</div>
       </div>
 
-      <div style={{ padding: "24px 18px 12px", textAlign: "center" }}>
-        <div className="mono" style={{ fontSize: 48, letterSpacing: "-.03em", lineHeight: 1, color: amt ? "var(--paper)" : "var(--dim)" }}>
-          <span className="rupee">₹</span>{amt || "0"}
-        </div>
-      </div>
+      <Bars buckets={buckets} avg={avg} sel={sel} onSel={setSel} />
 
-      <div className="hscroll" style={{ padding: "0 18px 10px" }}>
-        {chips.map((d) => (
-          <button key={d} className={`chip ${date === d ? "on" : ""}`}
-            style={{ color: date === d ? "var(--brass)" : "var(--muted)" }} onClick={() => setDate(d)}>
-            {relDay(d)}
-          </button>
-        ))}
-        <label className={`chip ${!chips.includes(date) ? "on" : ""}`} style={{ color: "var(--muted)", position: "relative" }}>
-          Pick date
-          <input type="date" value={date} max={iso(new Date())}
-            onChange={(e) => e.target.value && setDate(e.target.value)}
-            style={{ position: "absolute", inset: 0, opacity: 0, width: "100%" }} />
-        </label>
-      </div>
+      <Filters f={f} onPick={onPick} />
 
-      <div style={{ padding: "0 18px 10px" }}>
-        <CategorySelect cats={cats} value={cat} onChange={setCat} />
-      </div>
-
-      <div style={{ padding: "0 18px 10px" }}>
-        <input className="inp" placeholder="What was it for?" value={note} onChange={(e) => setNote(e.target.value)} />
-      </div>
-
-      {isEdit && (
-        <div style={{ padding: "0 18px 8px", textAlign: "center" }}>
-          <button className="eyebrow" onClick={() => (confirmDel ? onDelete(txn.id) : setConfirmDel(true))}
-            style={{ color: "var(--rust)", padding: 8 }}>
-            {confirmDel ? "Tap again to delete" : "Delete"}
-          </button>
-        </div>
+      {sel !== null && (
+        <button className="pill on" style={{ marginBottom: 16 }} onClick={() => setSel(null)}>
+          {buckets[sel].from === buckets[sel].to
+            ? relDay(buckets[sel].from)
+            : `${relDay(buckets[sel].from)} – ${relDay(buckets[sel].to)}`}
+          <span className="pchev"><Close /></span>
+        </button>
       )}
 
-      <div style={{ marginTop: "auto", padding: "0 14px calc(14px + env(safe-area-inset-bottom))",
-        display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
-        {["1","2","3","4","5","6","7","8","9",".","0","del"].map((k) => (
-          <button key={k} className="key" onClick={() => tap(k)} aria-label={k === "del" ? "Backspace" : k}>
-            {k === "del" ? "⌫" : k}
-          </button>
-        ))}
+      <DayGroups list={list} onTap={onTap}
+        empty={sel !== null ? "Nothing logged in that stretch." : `Nothing logged ${f.range.label}.`} />
+    </div>
+  );
+}
+
+/* ============================================================
+   Category detail
+   ============================================================ */
+function CategoryDetail({ f, txns, id, onBack, onTap, onPick }) {
+  const c = CAT[id];
+
+  const cur = useMemo(() => txns.filter((t) => {
+    const d = parseISO(t.date);
+    return t.cat === id && t.type === f.kind && d >= f.range.start && d <= f.range.end;
+  }), [txns, id, f.kind, f.range]);
+
+  const prevTotal = useMemo(() => txns.filter((t) => {
+    const d = parseISO(t.date);
+    return t.cat === id && t.type === f.kind && d >= f.range.prevStart && d <= f.range.prevEnd;
+  }).reduce((s, t) => s + t.amount, 0), [txns, id, f.kind, f.range]);
+
+  const total = cur.reduce((s, t) => s + t.amount, 0);
+  const shown = useCountUp(total);
+  const delta = prevTotal ? Math.round(((total - prevTotal) / prevTotal) * 100) : null;
+  const buckets = useMemo(() => bucketize(f.period, f.range, cur), [f.period, f.range, cur]);
+
+  const today = iso(new Date());
+  const elapsed = buckets.filter((b) => b.from <= today);
+  const avg = elapsed.length ? elapsed.reduce((s, b) => s + b.v, 0) / elapsed.length : 0;
+
+  return (
+    <div className="scroll">
+      <div className="navrow">
+        <button className="iconbtn" onClick={onBack} aria-label="Back"><Chevron dir="left" /></button>
+        <span className="navtitle" style={{ display: "flex", alignItems: "center", gap: 9 }}>
+          <span className="tile sm" style={{ color: c?.c, background: tint(c?.c) }}>{c?.e}</span>
+          {c?.name}
+        </span>
+        <span style={{ width: 40 }} />
       </div>
+
+      <div className="shead">
+        <div className="slabel">{f.range.title}</div>
+        <div className="stotal num">₹{money(shown)}</div>
+        <Delta pct={delta} from={f.range.from} goodDown={f.kind === "expense"} />
+      </div>
+
+      <Bars buckets={buckets} avg={avg} colour={c?.c} sel={null} />
+
+      <Filters f={f} onPick={onPick} showCat={false} />
+
+      <DayGroups list={cur} onTap={onTap} hideCat empty={`No ${c?.name.toLowerCase()} ${f.range.label}.`} />
     </div>
   );
 }
@@ -684,7 +832,7 @@ function EntrySheet({ txn, cats, onSave, onDelete, onClose }) {
 /* ============================================================
    Settings
    ============================================================ */
-function Settings({ txns, onClose, onReplace, onAdd }) {
+function SettingsScreen({ txns, onReplace, onAdd }) {
   const [confirm, setConfirm] = useState(false);
   const [msg, setMsg] = useState(null);
   const fileRef = useRef(null);
@@ -717,73 +865,348 @@ function Settings({ txns, onClose, onReplace, onAdd }) {
   const oldest = txns.length ? txns[txns.length - 1].date : null;
 
   return (
-    <div className="sheet">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 18px" }}>
-        <div className="eyebrow">Settings</div>
-        <button className="eyebrow" onClick={onClose}>Done</button>
+    <div className="scroll">
+      <div className="navrow" style={{ marginBottom: 16 }}>
+        <span className="navtitle">Settings</span>
       </div>
 
-      <div style={{ padding: "0 18px", overflowY: "auto" }}>
-        <div style={{ padding: "18px 0 24px", borderBottom: "1px solid var(--line)" }}>
-          <div className="mono" style={{ fontSize: 26 }}>{txns.length}</div>
-          <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 4 }}>
-            entries · <span className="mono">₹{money(spent)}</span> logged
-            {oldest && <> · since {relDay(oldest)}</>}
-          </div>
+      <div className="setcard" style={{ padding: 16 }}>
+        <div className="num" style={{ fontSize: 30, fontWeight: 700 }}>{txns.length}</div>
+        <div style={{ fontSize: 13.5, color: "var(--text2)", marginTop: 3 }}>
+          entries · ₹{money(spent)} logged{oldest ? ` · since ${relDay(oldest)}` : ""}
         </div>
+      </div>
 
-        {msg && (
-          <div style={{ padding: "12px 0", fontSize: 13, color: "var(--brass)" }}>{msg}</div>
-        )}
+      {msg && <div style={{ padding: "0 4px 14px", fontSize: 13.5, color: "var(--pos)" }}>{msg}</div>}
 
+      <div className="sect">Your data</div>
+      <div className="setcard">
         <button className="row" onClick={() => fileRef.current?.click()}>
-          <div>
-            <div>Import CSV</div>
-            <div style={{ fontSize: 11.5, color: "var(--dim)", marginTop: 3 }}>
+          <span>
+            Import CSV
+            <span className="rowsub" style={{ display: "block" }}>
               Adds to what's here. Negative amounts import as income.
-            </div>
-          </div>
-          <span className="eyebrow">↑</span>
+            </span>
+          </span>
+          <Chevron dir="right" size={16} />
         </button>
         <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={onFile} style={{ display: "none" }} />
 
         <button className="row" onClick={download}>
-          <div>
-            <div>Export CSV</div>
-            <div style={{ fontSize: 11.5, color: "var(--dim)", marginTop: 3 }}>
+          <span>
+            Export CSV
+            <span className="rowsub" style={{ display: "block" }}>
               Date, Amount, Category, Description, Month, Year
-            </div>
-          </div>
-          <span className="eyebrow">↓</span>
+            </span>
+          </span>
+          <Chevron dir="right" size={16} />
         </button>
 
         <button className="row" onClick={() => { onAdd(sample()); setMsg("Sample data loaded."); }}>
-          <div>
-            <div>Load sample data</div>
-            <div style={{ fontSize: 11.5, color: "var(--dim)", marginTop: 3 }}>
+          <span>
+            Load sample data
+            <span className="rowsub" style={{ display: "block" }}>
               Three months of made-up spending, to see how it looks.
-            </div>
-          </div>
-          <span className="eyebrow">+</span>
+            </span>
+          </span>
+          <Chevron dir="right" size={16} />
         </button>
 
-        <button className="row" onClick={() => (confirm ? (onReplace([]), setConfirm(false), setMsg("Everything erased.")) : setConfirm(true))}
-          style={{ color: confirm ? "var(--rust)" : "var(--paper)" }}>
-          <div>
-            <div>{confirm ? "Tap again to erase everything" : "Start fresh"}</div>
-            <div style={{ fontSize: 11.5, color: "var(--dim)", marginTop: 3 }}>
+        <button className="row"
+          style={{ color: confirm ? "var(--neg)" : "var(--text)" }}
+          onClick={() => (confirm ? (onReplace([]), setConfirm(false), setMsg("Everything erased.")) : setConfirm(true))}>
+          <span>
+            {confirm ? "Tap again to erase everything" : "Start fresh"}
+            <span className="rowsub" style={{ display: "block" }}>
               Deletes every entry. Export first if you want it.
-            </div>
-          </div>
-          <span className="eyebrow">✕</span>
+            </span>
+          </span>
+          <Chevron dir="right" size={16} />
         </button>
-
-        <div style={{ padding: "26px 0 40px", fontSize: 11.5, color: "var(--dim)", lineHeight: 1.65 }}>
-          Everything lives on this device and never leaves it. Nothing is synced,
-          so exporting now and then is your only backup — and deleting the app
-          takes the data with it.
-        </div>
       </div>
+
+      <div style={{ padding: "10px 4px 20px", fontSize: 12.5, color: "var(--text3)", lineHeight: 1.65 }}>
+        Everything lives on this device and never leaves it. Nothing is synced,
+        so exporting now and then is your only backup — and deleting the app
+        takes the data with it.
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   Entry sheet — add and edit
+   ============================================================ */
+function EntrySheet({ txn, cats, onSave, onDelete, onClose }) {
+  const isEdit = Boolean(txn.id);
+  const [amt, setAmt] = useState(isEdit ? String(txn.amount) : "");
+  const [type, setType] = useState(txn.type || "expense");
+  const [cat, setCat] = useState(txn.cat || cats[0]?.id || "dining");
+  const [note, setNote] = useState(txn.note || "");
+  const [date, setDate] = useState(txn.date || iso(new Date()));
+  const [grid, setGrid] = useState(false);
+  const [noting, setNoting] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(false);
+
+  const tap = (k) => {
+    if (k === "del") return setAmt((a) => a.slice(0, -1));
+    if (k === "." && amt.includes(".")) return;
+    if (amt.includes(".") && amt.split(".")[1]?.length >= 2) return;
+    if (amt.replace(".", "").length >= 8) return;
+    setAmt((a) => (a === "0" && k !== "." ? k : a + k));
+  };
+
+  const valid = parseFloat(amt) > 0;
+  const submit = () => {
+    if (!valid) return;
+    onSave({ ...(isEdit ? txn : {}), amount: parseFloat(amt), type, cat, note: note.trim(), date });
+  };
+
+  const dates = [0, 1].map((o) => { const d = new Date(); d.setDate(d.getDate() - o); return iso(d); });
+  const sel = CAT[cat];
+
+  return (
+    <div className="sheet">
+      <div className="grab" />
+
+      <div className="sheettop">
+        <button className="iconbtn" onClick={onClose} aria-label="Cancel"><Close /></button>
+        <div className="seg" style={{ maxWidth: 210 }}>
+          <button className={`segbtn ${type === "expense" ? "on" : ""}`} onClick={() => setType("expense")}>Spent</button>
+          <button className={`segbtn ${type === "income" ? "on" : ""}`} onClick={() => setType("income")}>Received</button>
+        </div>
+        <button className="iconbtn" onClick={submit} disabled={!valid} aria-label="Save"
+          style={valid ? { background: "var(--text)", color: "var(--bg)" } : undefined}>
+          <Check />
+        </button>
+      </div>
+
+      <div className="amount">
+        <span className={`amountval num ${amt ? "" : "zero"}`}>
+          <span className="rupee">₹</span>{amt || "0"}
+        </span>
+        <button className="bksp" onClick={() => tap("del")} disabled={!amt} aria-label="Backspace">
+          <Backspace />
+        </button>
+      </div>
+
+      <div className="metarow">
+        <div className="chiprow">
+          {dates.map((d) => (
+            <button key={d} className={`chip ${date === d ? "on filled" : ""}`} onClick={() => setDate(d)}>
+              📅 {relDay(d)}
+            </button>
+          ))}
+          <label className={`chip ${!dates.includes(date) ? "on filled" : ""}`} style={{ position: "relative" }}>
+            {dates.includes(date) ? "📅" : `📅 ${relDay(date)}`}
+            <input type="date" value={date} max={iso(new Date())}
+              onChange={(e) => e.target.value && setDate(e.target.value)}
+              style={{ position: "absolute", inset: 0, opacity: 0, width: "100%" }} />
+          </label>
+          <button className={`chip ${note ? "on filled" : ""}`} onClick={() => setNoting((v) => !v)}>
+            📝 {note ? (note.length > 16 ? note.slice(0, 16) + "…" : note) : "Note"}
+          </button>
+        </div>
+        {isEdit && (
+          <button className={`delbtn ${confirmDel ? "armed" : ""}`}
+            onClick={() => (confirmDel ? onDelete(txn.id) : setConfirmDel(true))}
+            aria-label={confirmDel ? "Tap again to delete" : "Delete"}
+            title={confirmDel ? "Tap again to delete" : "Delete"}>
+            <Trash />
+          </button>
+        )}
+      </div>
+
+      {noting && (
+        <div style={{ padding: "0 16px 12px" }}>
+          <input className="inp" autoFocus placeholder="What was it for?" value={note}
+            onChange={(e) => setNote(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && setNoting(false)} />
+        </div>
+      )}
+
+      <div className="catstrip">
+        <div className="chiprow">
+          {cats.map((c) => (
+            <button key={c.id} className={`chip ${c.id === cat ? "on" : ""}`}
+              onClick={() => setCat(c.id)}
+              style={c.id === cat ? { color: "var(--text)" } : undefined}>
+              {c.e} {c.name}
+            </button>
+          ))}
+        </div>
+        <button className={`gridbtn ${grid ? "on" : ""}`} onClick={() => setGrid((v) => !v)}
+          aria-label="All categories" aria-expanded={grid}>
+          <GridIcon />
+        </button>
+      </div>
+
+      {grid && (
+        <div className="catgrid">
+          {CATS.map((c) => (
+            <button key={c.id} className={`gopt ${c.id === cat ? "on" : ""}`}
+              onClick={() => { setCat(c.id); setGrid(false); }}>
+              <span className="tile sm" style={{ color: c.c, background: tint(c.c) }}>{c.e}</span>
+              <span className="gname">{c.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {!grid && (
+        <div className="keypad">
+          {["1","2","3","4","5","6","7","8","9",".","0","del"].map((k) => (
+            <button key={k} className="key" onClick={() => tap(k)}
+              aria-label={k === "del" ? "Backspace" : k}>
+              {k === "del" ? <Backspace /> : k}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   App
+   ============================================================ */
+export default function App() {
+  const [txns, setTxns] = useState([]);
+  const [ready, setReady] = useState(false);
+  const [error, setError] = useState(null);
+  const [tab, setTab] = useState("summary");
+  const [editing, setEditing] = useState(null);
+  const [drill, setDrill] = useState(null);
+  const [picker, setPicker] = useState(null);
+
+  const [period, setPeriod] = useState("m");
+  const [off, setOff] = useState(0);
+  const [kind, setKind] = useState("expense");
+  const [catFilter, setCatFilter] = useState(null);
+
+  // Any change to what's on screen returns you to the top of it — the
+  // content below a stale scroll offset is never the content you left.
+  useEffect(() => { window.scrollTo(0, 0); }, [tab, drill, period, off, kind, catFilter]);
+
+  useEffect(() => {
+    db.getAll()
+      .then((rows) => {
+        rows.sort((a, b) => b.date.localeCompare(a.date));
+        setTxns(rows);
+      })
+      .catch((e) => setError(e.message || "Couldn't open the database."))
+      .finally(() => setReady(true));
+  }, []);
+
+  // Stepping to a different grain restarts at the current one — landing on
+  // "3 quarters ago" because you were 3 months back is never what you meant.
+  const changePeriod = (p) => { setPeriod(p); setOff(0); };
+
+  const range = useMemo(() => periodRange(period, off), [period, off]);
+  const f = { period, setPeriod: changePeriod, off, setOff, kind, setKind, catFilter, setCatFilter, range };
+
+  const cur = useMemo(() => txns.filter((t) => {
+    const d = parseISO(t.date);
+    return t.type === kind && (!catFilter || t.cat === catFilter) && d >= range.start && d <= range.end;
+  }), [txns, kind, catFilter, range]);
+
+  const prevTotal = useMemo(() => txns.filter((t) => {
+    const d = parseISO(t.date);
+    return t.type === kind && (!catFilter || t.cat === catFilter) && d >= range.prevStart && d <= range.prevEnd;
+  }).reduce((s, t) => s + t.amount, 0), [txns, kind, catFilter, range]);
+
+  // Categories ranked by how often you use them — most of the speed of
+  // manual entry is the picker already showing your usual few.
+  const catOrder = useMemo(() => {
+    const n = {};
+    txns.forEach((t) => { n[t.cat] = (n[t.cat] || 0) + 1; });
+    return [...CATS].sort((a, b) => (n[b.id] || 0) - (n[a.id] || 0));
+  }, [txns]);
+
+  const save = async (t) => {
+    const rec = t.id ? t : { ...t, id: uid() };
+    setTxns((p) => {
+      const next = t.id ? p.map((x) => (x.id === t.id ? rec : x)) : [rec, ...p];
+      return next.sort((a, b) => b.date.localeCompare(a.date));
+    });
+    setEditing(null);
+    try { await db.put(rec); } catch { setError("Save failed. Your change may not survive a reload."); }
+  };
+
+  const remove = async (id) => {
+    setTxns((p) => p.filter((t) => t.id !== id));
+    setEditing(null);
+    try { await db.remove(id); } catch { setError("Delete failed."); }
+  };
+
+  const replaceAll = async (rows) => {
+    setTxns([...rows].sort((a, b) => b.date.localeCompare(a.date)));
+    try { await db.clear(); if (rows.length) await db.bulkPut(rows); }
+    catch { setError("Couldn't write to the database."); }
+  };
+
+  const addMany = async (rows) => {
+    setTxns((p) => [...p, ...rows].sort((a, b) => b.date.localeCompare(a.date)));
+    try { await db.bulkPut(rows); } catch { setError("Import didn't fully save."); }
+  };
+
+  if (!ready) {
+    return <div className="lg"><div className="scroll"><div className="empty">Loading…</div></div></div>;
+  }
+
+  const TABS = [["summary", "Summary", PieIcon], ["entries", "Entries", ListIcon], ["settings", "Settings", GearIcon]];
+
+  return (
+    <div className="lg">
+      {error && (
+        <div style={{ background: "var(--neg)", color: "#10141A", padding: "11px 16px", fontSize: 13.5, fontWeight: 500 }}
+          onClick={() => setError(null)} role="alert">
+          {error} — tap to dismiss
+        </div>
+      )}
+
+      {drill ? (
+        <CategoryDetail f={f} txns={txns} id={drill} onBack={() => setDrill(null)}
+          onTap={setEditing} onPick={setPicker} />
+      ) : (
+        <>
+          {tab === "summary" && (
+            <Summary f={f} cur={cur} prevTotal={prevTotal} onPick={setPicker} onDrill={setDrill} />
+          )}
+          {tab === "entries" && <Entries f={f} cur={cur} onPick={setPicker} onTap={setEditing} />}
+          {tab === "settings" && <SettingsScreen txns={txns} onReplace={replaceAll} onAdd={addMany} />}
+        </>
+      )}
+
+      <nav className="navwrap">
+        <div className="navpill">
+          {TABS.map(([k, name, Icon]) => (
+            <button key={k} className={`navbtn ${!drill && tab === k ? "on" : ""}`}
+              onClick={() => { setDrill(null); setTab(k); }}
+              aria-current={!drill && tab === k ? "page" : undefined}>
+              <Icon />
+              {name}
+            </button>
+          ))}
+        </div>
+        <button className="fab" onClick={() => setEditing({})} aria-label="Add transaction"><Plus /></button>
+      </nav>
+
+      {picker === "period" && (
+        <PickerSheet title="Period" value={period} onClose={() => setPicker(null)}
+          onPick={changePeriod}
+          options={PERIODS.map(([id, name]) => ({ id, name }))} />
+      )}
+      {picker === "cat" && (
+        <PickerSheet title="Category" value={catFilter} onClose={() => setPicker(null)}
+          onPick={setCatFilter}
+          options={[{ id: null, name: "All categories" }, ...CATS]} />
+      )}
+
+      {editing && (
+        <EntrySheet txn={editing} cats={catOrder} onSave={save}
+          onDelete={remove} onClose={() => setEditing(null)} />
+      )}
     </div>
   );
 }

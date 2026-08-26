@@ -1,14 +1,34 @@
+/* ============================================================
+   Ledger — Quanto-style dark theme
+
+   One family (Outfit) for everything, near-black slate surfaces, vivid
+   category hues, and a shape language built on three radii: pill for
+   controls, card for containers, tile for the little category icons.
+   ============================================================ */
+
 :root {
-  --ink: #14161f;
-  --raised: #1c1f2a;
-  --raised2: #232733;
-  --line: #2c3040;
-  --paper: #e9e7e2;
-  --muted: #8a8fa2;
-  --dim: #5c6173;
-  --brass: #c89b3c;
-  --teal: #4fa890;
-  --rust: #c2553f;
+  --bg: #10141a;
+  --bg-soft: #151a21;
+  --surface: #1a1f26;
+  --surface2: #232931;
+  --surface3: #2c333d;
+  --hair: #262d36;
+
+  --text: #ffffff;
+  --text2: #8e97a3;
+  --text3: #5d6673;
+
+  --pos: #2ecc71;
+  --neg: #ff5a5f;
+
+  --r-pill: 999px;
+  --r-card: 18px;
+  --r-tile: 13px;
+  --r-key: 16px;
+
+  /* Height of the floating nav plus its breathing room, so every scroll
+     view can reserve exactly the right amount of space beneath itself. */
+  --nav-space: 108px;
 }
 
 * {
@@ -19,13 +39,13 @@ html,
 body {
   margin: 0;
   padding: 0;
-  background: var(--ink);
+  background: var(--bg);
   min-height: 100%;
 }
 
 body {
-  color: var(--paper);
-  font-family: "Instrument Sans", system-ui, -apple-system, sans-serif;
+  color: var(--text);
+  font-family: Outfit, system-ui, -apple-system, "Segoe UI", sans-serif;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior-y: none;
@@ -48,167 +68,491 @@ button {
   min-height: 100dvh;
 }
 
-.mono {
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
+/* Amount columns only. Outfit's proportional figures are prettier in
+   headlines but never line up in a right-aligned list. */
+.num {
   font-variant-numeric: tabular-nums;
 }
 
-.eyebrow {
-  font-family: "IBM Plex Mono", monospace;
-  font-size: 10px;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--dim);
-  font-weight: 500;
-}
-
 .rupee {
-  font-weight: 300;
-  opacity: 0.5;
-  font-size: 0.62em;
-  margin-right: 0.1em;
+  font-weight: 500;
+  color: var(--text2);
+  font-size: 0.6em;
+  margin-right: 0.08em;
 }
 
 .scroll {
-  padding: calc(20px + env(safe-area-inset-top)) 18px 112px;
+  padding: calc(14px + env(safe-area-inset-top)) 16px var(--nav-space);
 }
 
-.card {
-  background: var(--raised);
-  border: 1px solid var(--line);
-  border-radius: 14px;
+/* ============================================================
+   Screen header — centred label, big total, delta badge
+   ============================================================ */
+.shead {
+  text-align: center;
+  padding: 6px 0 18px;
 }
 
-/* the signature: a month's spending shape */
-.rhythm {
+.slabel {
+  font-size: 15px;
+  color: var(--text2);
+  font-weight: 500;
+}
+
+.stotal {
+  font-size: 46px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.15;
+  margin-top: 2px;
+}
+
+/* The green pill: a filled circular arrow, then the percentage, then a
+   muted comparison. Colour carries the sign; the arrow repeats it so it
+   still reads without colour vision. */
+.delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14.5px;
+  font-weight: 600;
+  margin-top: 4px;
+}
+.delta .darrow {
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: var(--bg);
+}
+.delta .dfrom {
+  color: inherit;
+  font-weight: 500;
+}
+
+/* ============================================================
+   Donut
+   ============================================================ */
+.donutwrap {
+  position: relative;
+  width: 100%;
+  max-width: 300px;
+  margin: 4px auto 6px;
+  aspect-ratio: 1;
+}
+/* Direct child only: the label group inside the hole has its own svg
+   icons, and a descendant selector would spin those too. */
+.donutwrap > svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  transform: rotate(-90deg);
+}
+.arc {
+  transition: stroke-dasharray 0.85s cubic-bezier(0.2, 0.8, 0.2, 1);
+  cursor: pointer;
+}
+.arc:hover {
+  opacity: 0.82;
+}
+/* The label group sits in the hole, not over the ring. */
+.donutmid {
+  position: absolute;
+  inset: 26%;
   display: flex;
-  align-items: flex-end;
-  gap: 2px;
-  height: 76px;
-}
-.rbar {
-  flex: 1;
-  min-width: 0;
-  border-radius: 2px 2px 0 0;
-  background: var(--dim);
-  transition: height 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-.rbar.we {
-  background: var(--brass);
-  opacity: 0.85;
-}
-.rbar.today {
-  outline: 1px solid var(--paper);
-  outline-offset: 1px;
-}
-.rbar.sel {
-  background: var(--paper) !important;
-  opacity: 1;
-}
-.rbar.future {
-  background: var(--line);
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  pointer-events: none;
 }
 
+/* ============================================================
+   Filter pills
+   ============================================================ */
+.pills {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 4px 0 2px;
+  margin: 2px 0 18px;
+}
+.pills::-webkit-scrollbar {
+  display: none;
+}
+
+.pill {
+  flex-shrink: 0;
+  padding: 11px 18px;
+  border-radius: var(--r-pill);
+  background: var(--surface2);
+  color: var(--text);
+  font-size: 14.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  transition: background 0.15s;
+}
+.pill:active {
+  background: var(--surface3);
+}
+/* "Active" here means narrowed, not selected — a filter doing something. */
+.pill.on {
+  background: var(--text);
+  color: var(--bg);
+}
+.pill .pchev {
+  color: var(--text3);
+  display: flex;
+}
+.pill.on .pchev {
+  color: var(--bg);
+  opacity: 0.5;
+}
+
+/* ============================================================
+   Category rows
+   ============================================================ */
 .catrow {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 9px 0;
+  gap: 13px;
+  width: 100%;
+  padding: 11px 13px;
+  border-radius: var(--r-card);
+  text-align: left;
+  transition: background 0.15s;
 }
-.cattrack {
-  flex: 1;
-  height: 6px;
-  background: var(--raised2);
-  border-radius: 3px;
+.catrow:active {
+  background: var(--surface);
+}
+
+/* Emoji on a tinted wash of its own hue, ringed in the solid colour.
+   The tint is the colour at 18% over the page, mixed rather than
+   layered so it stays flat against the card behind it. */
+.tile {
+  width: 42px;
+  height: 42px;
+  border-radius: var(--r-tile);
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+  line-height: 1;
+  flex-shrink: 0;
+  border: 2px solid currentColor;
+}
+.tile.sm {
+  width: 36px;
+  height: 36px;
+  font-size: 17px;
+  border-radius: 11px;
+}
+
+.catname {
+  font-size: 15.5px;
+  font-weight: 500;
+  color: var(--text);
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.catfill {
+
+.count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text2);
+  background: var(--surface2);
+  border-radius: var(--r-pill);
+  padding: 2px 8px;
+  flex-shrink: 0;
+}
+
+.pct {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text2);
+  background: var(--surface2);
+  border-radius: 8px;
+  padding: 3px 7px;
+  flex-shrink: 0;
+  min-width: 52px;
+  text-align: right;
+}
+
+/* ============================================================
+   Bar chart
+   ============================================================ */
+.chart {
+  position: relative;
+  padding-right: 46px;
+  margin: 8px 0 4px;
+}
+.bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
   height: 100%;
-  border-radius: 3px;
-  transition: width 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.slot {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  padding: 0;
+}
+/* The ghost track — what the day could have been. Keeps the chart from
+   collapsing into a ragged skyline when half the month is unspent. */
+.slot::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--surface2);
+  opacity: 0.34;
+  border-radius: 4px;
+}
+.bar {
+  position: relative;
+  width: 100%;
+  border-radius: 4px;
+  background: var(--text);
+  transition: height 0.55s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.2s;
+}
+.slot.dim .bar {
+  opacity: 0.28;
+}
+.slot.sel .bar {
+  opacity: 1;
+}
+.slot.sel::before {
+  background: var(--surface3);
+  opacity: 0.9;
+}
+
+.avgline {
+  position: absolute;
+  left: 0;
+  right: 46px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.55);
+  pointer-events: none;
+}
+
+.yaxis {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 46px;
+  pointer-events: none;
+}
+.yaxis span {
+  position: absolute;
+  right: 0;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text3);
+  transform: translateY(50%);
+  white-space: nowrap;
+}
+.yaxis span.mid {
+  color: var(--text2);
+  border-bottom: 1px dotted var(--text3);
+}
+
+.xaxis {
+  display: flex;
+  margin-top: 8px;
+  padding-right: 46px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text3);
+}
+.xaxis span {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+}
+
+/* ============================================================
+   Transaction list — a header row, then that day in its own card
+   ============================================================ */
+.dayhead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 0 4px 7px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text2);
+}
+
+.daycard {
+  background: var(--surface);
+  border-radius: var(--r-card);
+  overflow: hidden;
+  margin-bottom: 18px;
 }
 
 .txn {
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 11px 0;
-  border-bottom: 1px solid var(--line);
+  gap: 12px;
+  width: 100%;
+  padding: 11px 13px;
+  text-align: left;
+  border-bottom: 1px solid var(--hair);
 }
 .txn:last-child {
   border-bottom: none;
 }
 .txn:active {
-  background: var(--raised);
+  background: var(--surface2);
 }
-.dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
+.txnname {
+  flex: 1;
+  min-width: 0;
+  font-size: 15.5px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.txnsub {
+  font-size: 12.5px;
+  color: var(--text3);
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.txnamt {
+  font-size: 15.5px;
+  font-weight: 600;
   flex-shrink: 0;
 }
 
-.tabbar {
+/* ============================================================
+   Floating navigation — a pill, and the add button beside it
+   ============================================================ */
+.navwrap {
   position: fixed;
-  bottom: 0;
+  bottom: calc(14px + env(safe-area-inset-bottom));
   left: 0;
   right: 0;
   max-width: 480px;
   margin: 0 auto;
-  background: rgba(20, 22, 31, 0.93);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border-top: 1px solid var(--line);
+  padding: 0 16px;
   display: flex;
   align-items: center;
-  padding: 9px 18px calc(9px + env(safe-area-inset-bottom));
+  gap: 10px;
   z-index: 40;
+  pointer-events: none;
 }
-.tab {
+
+.navpill {
   flex: 1;
-  text-align: center;
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  font-family: "IBM Plex Mono", monospace;
-  color: var(--dim);
-  padding: 7px 0;
-  transition: color 0.15s;
+  display: flex;
+  background: rgba(35, 41, 49, 0.82);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--r-pill);
+  padding: 6px;
+  pointer-events: auto;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
 }
-.tab.on {
-  color: var(--paper);
+
+.navbtn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 7px 0 6px;
+  border-radius: var(--r-pill);
+  color: var(--text3);
+  font-size: 11px;
+  font-weight: 500;
+  transition: color 0.15s, background 0.15s;
+}
+.navbtn.on {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.07);
 }
 
 .fab {
-  width: 50px;
-  height: 50px;
+  width: 56px;
+  height: 56px;
   border-radius: 50%;
-  background: var(--brass);
-  color: #14161f;
-  font-size: 26px;
-  line-height: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  background: var(--text);
+  color: #0b0e12;
+  display: grid;
+  place-items: center;
   flex-shrink: 0;
-  margin: 0 10px;
-  transition: transform 0.1s;
+  pointer-events: auto;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+  transition: transform 0.12s;
 }
 .fab:active {
-  transform: scale(0.93);
+  transform: scale(0.92);
 }
 
+/* ============================================================
+   Round icon buttons
+   ============================================================ */
+.iconbtn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--surface2);
+  color: var(--text);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+.iconbtn:active {
+  background: var(--surface3);
+}
+.iconbtn:disabled {
+  background: transparent;
+  color: var(--text3);
+  cursor: default;
+}
+
+.navrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.navtitle {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+/* ============================================================
+   Entry sheet
+   ============================================================ */
 .sheet {
   position: fixed;
   inset: 0;
   max-width: 480px;
   margin: 0 auto;
-  background: var(--ink);
+  background: var(--bg-soft);
   z-index: 60;
   display: flex;
   flex-direction: column;
+  border-radius: 22px 22px 0 0;
   padding-top: env(safe-area-inset-top);
-  animation: up 0.26s cubic-bezier(0.2, 0.8, 0.2, 1);
+  animation: up 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 @keyframes up {
   from {
@@ -219,144 +563,175 @@ button {
   }
 }
 
-.key {
-  height: 56px;
-  border-radius: 11px;
-  font-size: 23px;
-  font-family: "IBM Plex Mono", monospace;
-  background: var(--raised);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.key:active {
-  background: var(--raised2);
+.grab {
+  width: 38px;
+  height: 5px;
+  border-radius: var(--r-pill);
+  background: var(--surface3);
+  margin: 10px auto 0;
+  flex-shrink: 0;
 }
 
-.chip {
-  padding: 8px 13px;
-  border-radius: 9px;
-  background: var(--raised);
-  font-size: 13px;
-  white-space: nowrap;
-  border: 1px solid transparent;
-  transition: 0.15s;
-}
-.chip.on {
-  background: var(--raised2);
-  border-color: currentColor;
-}
-
-.seg {
-  display: flex;
-  background: var(--raised);
-  border-radius: 10px;
-  padding: 3px;
-  gap: 2px;
-}
-.segbtn {
-  flex: 1;
-  padding: 7px 0;
-  border-radius: 7px;
-  font-size: 12px;
-  color: var(--muted);
-  transition: 0.15s;
-}
-.segbtn.on {
-  background: var(--raised2);
-  color: var(--paper);
-}
-
-.inp {
-  width: 100%;
-  background: var(--raised);
-  border: 1px solid var(--line);
-  border-radius: 11px;
-  padding: 13px;
-  color: var(--paper);
-  /* 16px keeps iOS from zooming the viewport on focus */
-  font-size: 16px;
-  font-family: inherit;
-  outline: none;
-}
-.inp:focus {
-  border-color: var(--brass);
-}
-.inp::placeholder {
-  color: var(--dim);
-}
-
-.row {
+.sheettop {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  width: 100%;
-  padding: 15px 0;
-  border-bottom: 1px solid var(--line);
-  font-size: 14.5px;
-  text-align: left;
+  padding: 10px 16px 0;
 }
 
-.hscroll {
+/* The amount, as big as it can be without wrapping. */
+.amount {
+  flex: 1;
   display: flex;
-  gap: 7px;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 10px 16px;
+  min-height: 96px;
+}
+.amountval {
+  font-size: 56px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+.amountval.zero {
+  color: var(--text3);
+}
+.amountval .rupee {
+  font-size: 0.52em;
+}
+.bksp {
+  width: 42px;
+  height: 30px;
+  border-radius: var(--r-pill);
+  background: var(--surface2);
+  color: var(--text2);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.bksp:active {
+  background: var(--surface3);
+}
+.bksp:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* Dates and note scroll; delete stays put beside them. */
+.metarow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px 10px;
+}
+.metarow .chiprow {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+}
+
+.delbtn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--surface2);
+  color: var(--neg);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+/* Armed reads as loaded, not as done — one more tap still to come. */
+.delbtn.armed {
+  background: var(--neg);
+  color: var(--bg);
+}
+
+.chiprow {
+  display: flex;
+  gap: 8px;
   overflow-x: auto;
   scrollbar-width: none;
+  padding: 0 16px 10px;
 }
-.hscroll::-webkit-scrollbar {
+.chiprow::-webkit-scrollbar {
   display: none;
 }
 
-/* Category picker: a field that opens into a grid of everything, so
-   nothing is hidden behind a swipe and picking is still one tap. */
-.selwrap {
-  position: relative;
+.chip {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 15px;
+  border-radius: var(--r-pill);
+  background: var(--surface2);
+  color: var(--text2);
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  border: 1.5px solid transparent;
+  transition: 0.15s;
+}
+.chip.on {
+  color: var(--text);
+  border-color: var(--surface3);
+  background: var(--surface);
+}
+.chip.filled {
+  color: var(--text);
 }
 
-.select {
-  width: 100%;
+/* Category strip: chips scroll, and the grid button is pinned beside
+   them so the full fourteen are always one tap away. */
+.catstrip {
   display: flex;
   align-items: center;
-  gap: 10px;
-  background: var(--raised);
-  border: 1px solid var(--line);
-  border-radius: 11px;
-  padding: 13px;
-  font-size: 15px;
-  text-align: left;
-  transition: border-color 0.15s;
+  gap: 8px;
+  padding: 0 16px 12px;
 }
-.select.open {
-  border-color: var(--brass);
+.catstrip .chiprow {
+  padding: 0;
+  flex: 1;
+  border: 1.5px solid var(--surface3);
+  border-radius: var(--r-pill);
+  padding: 4px;
 }
-.select .chev {
-  margin-left: auto;
-  color: var(--dim);
-  font-size: 10px;
-  transition: transform 0.18s;
+.catstrip .chip {
+  border: none;
+  background: transparent;
+  padding: 7px 12px;
 }
-.select.open .chev {
-  transform: rotate(180deg);
+.catstrip .chip.on {
+  background: var(--surface2);
 }
 
-.dropdown {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: calc(100% + 6px);
-  z-index: 5;
-  background: var(--raised2);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 5px;
-  max-height: 46vh;
+.gridbtn {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: var(--surface2);
+  color: var(--text2);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.gridbtn.on {
+  background: var(--surface3);
+  color: var(--text);
+}
+
+.catgrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  padding: 0 16px 12px;
+  max-height: 34vh;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.6);
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1px;
-  animation: drop 0.16s cubic-bezier(0.2, 0.8, 0.2, 1);
+  animation: drop 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 @keyframes drop {
   from {
@@ -368,35 +743,145 @@ button {
     transform: translateY(0);
   }
 }
+.gopt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 10px 4px;
+  border-radius: 14px;
+  background: var(--surface);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text2);
+  line-height: 1.2;
+  text-align: center;
+}
+.gopt.on {
+  background: var(--surface2);
+  color: var(--text);
+}
+.gopt span.gname {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
 
-.opt {
+.keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 9px;
+  padding: 0 12px calc(12px + env(safe-area-inset-bottom));
+}
+.key {
+  height: 62px;
+  border-radius: var(--r-key);
+  font-size: 26px;
+  font-weight: 600;
+  background: var(--surface);
+  display: grid;
+  place-items: center;
+  transition: background 0.12s;
+}
+.key:active {
+  background: var(--surface2);
+}
+
+/* ============================================================
+   Segmented control, inputs, settings rows
+   ============================================================ */
+.seg {
+  display: flex;
+  background: var(--surface2);
+  border-radius: var(--r-pill);
+  padding: 4px;
+  gap: 3px;
+}
+.segbtn {
+  flex: 1;
+  padding: 8px 14px;
+  border-radius: var(--r-pill);
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text2);
+  white-space: nowrap;
+  transition: 0.15s;
+}
+.segbtn.on {
+  background: var(--text);
+  color: var(--bg);
+  font-weight: 600;
+}
+
+.inp {
+  width: 100%;
+  background: var(--surface);
+  border: 1.5px solid var(--surface2);
+  border-radius: 14px;
+  padding: 13px 15px;
+  color: var(--text);
+  /* 16px keeps iOS from zooming the viewport on focus */
+  font-size: 16px;
+  font-family: inherit;
+  outline: none;
+}
+.inp:focus {
+  border-color: var(--surface3);
+}
+.inp::placeholder {
+  color: var(--text3);
+}
+
+.setcard {
+  background: var(--surface);
+  border-radius: var(--r-card);
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+.row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px 9px;
-  border-radius: 8px;
-  font-size: 13px;
-  text-align: left;
+  justify-content: space-between;
+  gap: 12px;
   width: 100%;
-  color: var(--muted);
+  padding: 15px;
+  border-bottom: 1px solid var(--hair);
+  font-size: 15.5px;
+  font-weight: 500;
+  text-align: left;
 }
-.opt.on {
-  background: var(--raised);
-  color: var(--paper);
+.row:last-child {
+  border-bottom: none;
 }
-.opt:active {
-  background: var(--raised);
+.row:active {
+  background: var(--surface2);
+}
+.rowsub {
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--text3);
+  margin-top: 3px;
 }
 
-.backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 4;
+.empty {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text2);
+  font-size: 14.5px;
+  line-height: 1.65;
+}
+
+.sect {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text2);
+  padding: 0 4px 9px;
 }
 
 button:focus-visible,
 input:focus-visible {
-  outline: 2px solid var(--brass);
+  outline: 2px solid var(--text);
   outline-offset: 2px;
 }
 
