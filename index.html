@@ -15,7 +15,10 @@
 
     <!-- iOS standalone behaviour -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <!-- NOT black-translucent: it hands the page a layout viewport 59px shorter
+         than the screen, so everything anchored with `bottom:` floats that far
+         above the real bottom edge. Verified on an iPhone 15 Pro Max. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
     <meta name="apple-mobile-web-app-title" content="Ledger" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 

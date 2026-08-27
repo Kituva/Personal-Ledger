@@ -26,9 +26,16 @@
   --r-tile: 13px;
   --r-key: 16px;
 
+  /* How far the floating nav sits above the bottom edge. iOS reserves a 34px
+     strip for the home indicator, but the indicator bar itself only occupies
+     its lower ~14px — tucking the nav a little into that strip reads better
+     than clearing the whole thing, and still leaves the bar untouched.
+     Desktop has no inset, so max() keeps it at the designed 14px. */
+  --nav-bottom: max(14px, calc(env(safe-area-inset-bottom) - 10px));
+
   /* Height of the floating nav plus its breathing room, so every scroll
      view can reserve exactly the right amount of space beneath itself. */
-  --nav-space: 108px;
+  --nav-space: calc(94px + var(--nav-bottom));
 }
 
 * {
@@ -442,7 +449,7 @@ button {
    ============================================================ */
 .navwrap {
   position: fixed;
-  bottom: calc(14px + env(safe-area-inset-bottom));
+  bottom: var(--nav-bottom);
   left: 0;
   right: 0;
   max-width: 480px;
@@ -772,7 +779,7 @@ button {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 9px;
-  padding: 0 12px calc(12px + env(safe-area-inset-bottom));
+  padding: 0 12px max(12px, env(safe-area-inset-bottom));
 }
 .key {
   height: 62px;
