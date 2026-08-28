@@ -21,6 +21,13 @@
   --pos: #2ecc71;
   --neg: #ff5a5f;
 
+  /* Every "this one is chosen" state in the app uses these two and nothing
+     else, so a selection looks the same wherever it is made. White on the
+     near-black ground is the loudest the theme has, and it clears contrast
+     on every surface — which the fourteen category hues did not. */
+  --sel: #ffffff;
+  --sel-wash: rgba(255, 255, 255, 0.12);
+
   --r-pill: 999px;
   --r-card: 18px;
   --r-tile: 13px;
@@ -210,7 +217,7 @@ button {
 }
 /* "Active" here means narrowed, not selected — a filter doing something. */
 .pill.on {
-  background: var(--text);
+  background: var(--sel);
   color: var(--bg);
 }
 .pill .pchev {
@@ -586,14 +593,31 @@ button {
   padding: 10px 16px 0;
 }
 
-/* The amount, as big as it can be without wrapping. */
+/* The amount, as big as it can be without wrapping, with the missing-field
+   hint under it. The hint keeps its line whether or not it has anything to
+   say, so nothing shifts as the entry is filled in. */
 .amount {
   flex: 1;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   padding: 10px 16px;
   min-height: 96px;
+}
+/* A panel is open below, and on a short phone those are the pixels that
+   decide whether the last week of the month is on screen. The figure keeps
+   its size — only the room around it gives way. */
+.amount.compact {
+  min-height: 60px;
+  padding: 6px 16px;
+}
+.amounthint {
+  min-height: 16px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text3);
 }
 .amountval {
   font-size: 56px;
@@ -619,6 +643,17 @@ button {
   flex: 1;
   min-width: 0;
   padding: 0;
+  overflow: visible;
+}
+/* The three chips share the row rather than bunching at the left. Growing
+   from their own width (1 1 auto) instead of an equal split (1 1 0) is what
+   keeps "Yesterday" readable while editing, where the delete button takes
+   52px out of the row and equal thirds are too narrow to hold the label. */
+.metarow .chip {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: center;
+  display: flex;
 }
 
 .delbtn {
@@ -664,63 +699,78 @@ button {
   border: 1.5px solid transparent;
   transition: 0.15s;
 }
+/* The chosen date inverts — the same "this one" language the Spent/Received
+   switch uses, and the only thing in the row bright enough to find without
+   looking for it. Chips are now dates and nothing else, so `on` is the only
+   state they need. */
 .chip.on {
-  color: var(--text);
-  border-color: var(--surface3);
-  background: var(--surface);
-}
-.chip.filled {
-  color: var(--text);
+  color: var(--bg);
+  border-color: var(--sel);
+  background: var(--sel);
+  font-weight: 600;
 }
 
-/* Category strip: chips scroll, and the grid button is pinned beside
-   them so the full fourteen are always one tap away. */
+/* One button where the scrolling strip used to be. The grid below is the
+   only place a category is chosen, so this has to answer "which one?" on its
+   own — hence the category's own tile and name rather than a bare icon. */
 .catstrip {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   padding: 0 16px 12px;
 }
-.catstrip .chiprow {
-  padding: 0;
-  flex: 1;
-  border: 1.5px solid var(--surface3);
+.catbtn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 14px 9px 9px;
   border-radius: var(--r-pill);
-  padding: 4px;
+  border: 1.5px solid var(--surface2);
+  background: var(--surface);
+  color: var(--text3);
+  font-size: 15px;
+  font-weight: 500;
+  transition: 0.15s;
 }
-.catstrip .chip {
-  border: none;
-  background: transparent;
-  padding: 7px 12px;
-}
-.catstrip .chip.on {
-  background: var(--surface2);
-}
-
-.gridbtn {
-  width: 46px;
-  height: 46px;
-  border-radius: 50%;
-  background: var(--surface2);
-  color: var(--text2);
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-}
-.gridbtn.on {
-  background: var(--surface3);
+.catbtn.filled {
   color: var(--text);
+}
+.catbtn.on {
+  border-color: var(--surface3);
+}
+.catbtn .catbtnname {
+  flex: 1;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The placeholder sits where a chosen category's tile would, so the button
+   keeps its height and the name never shifts sideways once one is picked. */
+.catbtnempty {
+  color: var(--text3);
+  background: var(--surface2);
 }
 
 .catgrid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  /* minmax(0, …) rather than a bare 1fr: a grid track's automatic minimum is
+     its content, so the longest label in each column — "Transportation",
+     "Gifts/Donations" — would widen that column and leave the cards
+     different sizes. Zero minimum makes every card identical. */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   padding: 0 16px 12px;
   max-height: 34vh;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  /* Hidden like every other scroller here. It also keeps the desktop
+     scrollbar from stealing 4px of card width that iOS, whose scrollbar
+     floats over the content, never gives up — the cards would otherwise be
+     narrower on desktop and clip a label iOS shows in full. */
+  scrollbar-width: none;
   animation: drop 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.catgrid::-webkit-scrollbar {
+  display: none;
 }
 @keyframes drop {
   from {
@@ -737,24 +787,99 @@ button {
   flex-direction: column;
   align-items: center;
   gap: 5px;
-  padding: 10px 4px;
+  padding: 12px 6px;
   border-radius: 14px;
+  border: 1.5px solid transparent;
   background: var(--surface);
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 500;
   color: var(--text2);
   line-height: 1.2;
   text-align: center;
+  transition: 0.15s;
 }
+/* Ringed and washed rather than filled: the cell holds a coloured tile and a
+   label, and a solid fill would leave neither anywhere to sit. */
 .gopt.on {
-  background: var(--surface2);
+  background: var(--sel-wash);
+  border-color: var(--sel);
   color: var(--text);
+  font-weight: 600;
 }
 .gopt span.gname {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 100%;
+}
+
+/* ============================================================
+   Calendar
+
+   Sized and coloured like the keypad it replaces: same surface, same
+   rounded key, same selection white as every other chosen thing.
+   ============================================================ */
+.cal {
+  padding: 0 12px max(12px, env(safe-area-inset-bottom));
+  animation: drop 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.calhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2px 12px;
+}
+.calmonth {
+  font-size: 16.5px;
+  font-weight: 600;
+}
+.caldow,
+.calgrid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 5px;
+}
+.caldow {
+  padding-bottom: 7px;
+}
+.caldow span {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text3);
+}
+.calday {
+  height: 40px;
+  border-radius: 12px;
+  border: 1.5px solid transparent;
+  background: var(--surface);
+  font-size: 15px;
+  font-weight: 500;
+  display: grid;
+  place-items: center;
+  transition: background 0.12s;
+}
+.calday:active {
+  background: var(--surface2);
+}
+/* Days either side of the month, and days that haven't happened, stay in
+   place so the weeks line up — they just stop asking to be tapped. */
+.calday.out {
+  background: transparent;
+  color: var(--text3);
+}
+.calday:disabled {
+  background: transparent;
+  color: var(--surface3);
+}
+.calday.now {
+  border-color: var(--surface3);
+}
+.calday.on {
+  background: var(--sel);
+  border-color: var(--sel);
+  color: var(--bg);
+  font-weight: 700;
 }
 
 .keypad {
@@ -798,7 +923,7 @@ button {
   transition: 0.15s;
 }
 .segbtn.on {
-  background: var(--text);
+  background: var(--sel);
   color: var(--bg);
   font-weight: 600;
 }

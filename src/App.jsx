@@ -200,6 +200,7 @@ const Chevron = ({ dir, size = 17 }) => (
     <polyline points={
       dir === "left" ? "15 5 9 12 15 19"
         : dir === "down" ? "5 9 12 15 19 9"
+        : dir === "up" ? "5 15 12 9 19 15"
         : "9 5 15 12 9 19"} />
   </svg>
 );
@@ -961,33 +962,78 @@ function SettingsScreen({ txns, onReplace, onAdd }) {
 }
 
 /* ============================================================
+   Calendar — the date picker, in place of the keypad
+
+   The browser's own <input type="date"> panel is native chrome: a light
+   card that ignores every token in this file and can't be restyled. This
+   is the same month grid in the app's own language, and it swaps with the
+   keypad exactly the way the category grid does.
+   ============================================================ */
+function Calendar({ value, onPick }) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const sel = parseISO(value);
+  const [month, setMonth] = useState(new Date(sel.getFullYear(), sel.getMonth(), 1));
+
+  const last = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+  const offset = (month.getDay() + 6) % 7;        // days from Monday to the 1st
+  const rows = Math.ceil((offset + last) / 7);
+  const start = startOfWeek(month);
+
+  const days = [];
+  for (let i = 0; i < rows * 7; i++) {
+    const d = new Date(start); d.setDate(d.getDate() + i);
+    days.push(d);
+  }
+
+  const step = (n) => setMonth(new Date(month.getFullYear(), month.getMonth() + n, 1));
+  // Nothing is logged in the future, so there is nowhere to step forward to.
+  const atNow = month.getFullYear() === today.getFullYear() && month.getMonth() === today.getMonth();
+
+  return (
+    <div className="cal">
+      <div className="calhead">
+        <button className="iconbtn" onClick={() => step(-1)} aria-label="Previous month">
+          <Chevron dir="left" size={16} />
+        </button>
+        <span className="calmonth">{MONTHS[month.getMonth()]} {month.getFullYear()}</span>
+        <button className="iconbtn" onClick={() => step(1)} disabled={atNow} aria-label="Next month">
+          <Chevron size={16} />
+        </button>
+      </div>
+
+      <div className="caldow">
+        {[1, 2, 3, 4, 5, 6, 0].map((i) => <span key={i}>{DOW[i].slice(0, 2)}</span>)}
+      </div>
+
+      <div className="calgrid">
+        {days.map((d) => {
+          const k = iso(d);
+          return (
+            <button key={k} disabled={d > today} onClick={() => onPick(k)}
+              className={`calday ${d.getMonth() !== month.getMonth() ? "out" : ""}` +
+                `${k === iso(today) ? " now" : ""}${k === value ? " on" : ""}`}>
+              {d.getDate()}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
    Entry sheet — add and edit
    ============================================================ */
-function EntrySheet({ txn, cats, onSave, onDelete, onClose }) {
+function EntrySheet({ txn, onSave, onDelete, onClose }) {
   const isEdit = Boolean(txn.id);
   const [amt, setAmt] = useState(isEdit ? String(txn.amount) : "");
   const [type, setType] = useState(txn.type || "expense");
-  const [cat, setCat] = useState(txn.cat || cats[0]?.id || "dining");
+  const [cat, setCat] = useState(txn.cat || null);
   const [note, setNote] = useState(txn.note || "");
   const [date, setDate] = useState(txn.date || iso(new Date()));
   const [grid, setGrid] = useState(false);
-  const [noting, setNoting] = useState(false);
-  const [focusNote, setFocusNote] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
-
-  // The description opens itself once the amount has a value: by then the
-  // number is decided and the only thing left to say is what it was for. It
-  // opens without taking focus, so the keypad stays live and the keyboard
-  // doesn't slide up over it. Once per sheet — reopening something you
-  // deliberately closed would be worse than never opening it. Edits start
-  // with an amount already set, so they never trigger it.
-  const autoOpened = useRef(isEdit);
-  useEffect(() => {
-    if (amt && !autoOpened.current) {
-      autoOpened.current = true;
-      setNoting(true);
-    }
-  }, [amt]);
+  const [cal, setCal] = useState(false);
 
   const tap = (k) => {
     if (k === "del") return setAmt((a) => a.slice(0, -1));
@@ -997,14 +1043,23 @@ function EntrySheet({ txn, cats, onSave, onDelete, onClose }) {
     setAmt((a) => (a === "0" && k !== "." ? k : a + k));
   };
 
-  const valid = parseFloat(amt) > 0;
+  // Every field has to be filled in before the entry can be saved. The one
+  // that is still missing names itself under the amount, in the order the
+  // sheet asks for them, so the greyed-out tick is never a mystery.
+  const missing =
+    !(parseFloat(amt) > 0) ? "Enter an amount"
+    : !cat ? "Pick a category"
+    : !note.trim() ? "Add a description"
+    : null;
+  const valid = !missing;
+
   const submit = () => {
     if (!valid) return;
     onSave({ ...(isEdit ? txn : {}), amount: parseFloat(amt), type, cat, note: note.trim(), date });
   };
 
   const dates = [0, 1].map((o) => { const d = new Date(); d.setDate(d.getDate() - o); return iso(d); });
-  const sel = CAT[cat];
+  const sel = cat ? CAT[cat] : null;
 
   return (
     <div className="sheet">
@@ -1016,33 +1071,32 @@ function EntrySheet({ txn, cats, onSave, onDelete, onClose }) {
           <button className={`segbtn ${type === "expense" ? "on" : ""}`} onClick={() => setType("expense")}>Spent</button>
           <button className={`segbtn ${type === "income" ? "on" : ""}`} onClick={() => setType("income")}>Received</button>
         </div>
-        <button className="iconbtn" onClick={submit} disabled={!valid} aria-label="Save"
+        <button className="iconbtn" onClick={submit} disabled={!valid}
+          aria-label={missing || "Save"} title={missing || "Save"}
           style={valid ? { background: "var(--text)", color: "var(--bg)" } : undefined}>
           <Check />
         </button>
       </div>
 
-      <div className="amount">
+      <div className={`amount ${grid || cal ? "compact" : ""}`}>
         <span className={`amountval num ${amt ? "" : "zero"}`}>
           <span className="rupee">₹</span>{amt || "0"}
         </span>
+        <span className="amounthint">{missing}</span>
       </div>
 
       <div className="metarow">
         <div className="chiprow">
           {dates.map((d) => (
-            <button key={d} className={`chip ${date === d ? "on filled" : ""}`} onClick={() => setDate(d)}>
+            <button key={d} className={`chip ${date === d ? "on" : ""}`}
+              onClick={() => { setDate(d); setCal(false); }}>
               📅 {relDay(d)}
             </button>
           ))}
-          <label className={`chip ${!dates.includes(date) ? "on filled" : ""}`} style={{ position: "relative" }}>
+          <button className={`chip ${!dates.includes(date) ? "on" : ""}`}
+            onClick={() => { setCal((v) => !v); setGrid(false); }} aria-expanded={cal}
+            aria-label={dates.includes(date) ? "Pick another date" : `Date: ${relDay(date)}`}>
             {dates.includes(date) ? "📅" : `📅 ${relDay(date)}`}
-            <input type="date" value={date} max={iso(new Date())}
-              onChange={(e) => e.target.value && setDate(e.target.value)}
-              style={{ position: "absolute", inset: 0, opacity: 0, width: "100%" }} />
-          </label>
-          <button className={`chip ${note ? "on filled" : ""}`} onClick={() => { setNoting((v) => !v); setFocusNote(true); }}>
-            📝 {note ? (note.length > 16 ? note.slice(0, 16) + "…" : note) : "Description"}
           </button>
         </div>
         {isEdit && (
@@ -1055,27 +1109,28 @@ function EntrySheet({ txn, cats, onSave, onDelete, onClose }) {
         )}
       </div>
 
-      {noting && (
-        <div style={{ padding: "0 16px 12px" }}>
-          <input className="inp" autoFocus={focusNote} placeholder="What was it for?" value={note}
-            onChange={(e) => setNote(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && setNoting(false)} />
-        </div>
-      )}
+      <div style={{ padding: "0 16px 12px" }}>
+        <input className="inp" placeholder="What was it for?" value={note}
+          onChange={(e) => setNote(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
+      </div>
 
       <div className="catstrip">
-        <div className="chiprow">
-          {cats.map((c) => (
-            <button key={c.id} className={`chip ${c.id === cat ? "on" : ""}`}
-              onClick={() => setCat(c.id)}
-              style={c.id === cat ? { color: "var(--text)" } : undefined}>
-              {c.e} {c.name}
-            </button>
-          ))}
-        </div>
-        <button className={`gridbtn ${grid ? "on" : ""}`} onClick={() => setGrid((v) => !v)}
-          aria-label="All categories" aria-expanded={grid}>
-          <GridIcon />
+        <button className={`catbtn ${sel ? "filled" : ""} ${grid ? "on" : ""}`}
+          onClick={() => { setGrid((v) => !v); setCal(false); }} aria-expanded={grid}
+          aria-label={sel ? `Category: ${sel.name}` : "Choose a category"}>
+          {sel ? (
+            <>
+              <span className="tile sm" style={{ color: sel.c, background: tint(sel.c) }}>{sel.e}</span>
+              <span className="catbtnname">{sel.name}</span>
+            </>
+          ) : (
+            <>
+              <span className="tile sm catbtnempty"><GridIcon /></span>
+              <span className="catbtnname">Choose a category</span>
+            </>
+          )}
+          <Chevron dir={grid ? "up" : "down"} size={16} />
         </button>
       </div>
 
@@ -1091,7 +1146,9 @@ function EntrySheet({ txn, cats, onSave, onDelete, onClose }) {
         </div>
       )}
 
-      {!grid && (
+      {cal && <Calendar value={date} onPick={(d) => { setDate(d); setCal(false); }} />}
+
+      {!grid && !cal && (
         <div className="keypad">
           {["1","2","3","4","5","6","7","8","9",".","0","del"].map((k) => (
             <button key={k} className="key" onClick={() => tap(k)}
@@ -1152,14 +1209,6 @@ export default function App() {
     const d = parseISO(t.date);
     return t.type === kind && (!catFilter || t.cat === catFilter) && d >= range.prevStart && d <= range.prevEnd;
   }).reduce((s, t) => s + t.amount, 0), [txns, kind, catFilter, range]);
-
-  // Categories ranked by how often you use them — most of the speed of
-  // manual entry is the picker already showing your usual few.
-  const catOrder = useMemo(() => {
-    const n = {};
-    txns.forEach((t) => { n[t.cat] = (n[t.cat] || 0) + 1; });
-    return [...CATS].sort((a, b) => (n[b.id] || 0) - (n[a.id] || 0));
-  }, [txns]);
 
   const save = async (t) => {
     const rec = t.id ? t : { ...t, id: uid() };
@@ -1242,7 +1291,7 @@ export default function App() {
       )}
 
       {editing && (
-        <EntrySheet txn={editing} cats={catOrder} onSave={save}
+        <EntrySheet txn={editing} onSave={save}
           onDelete={remove} onClose={() => setEditing(null)} />
       )}
     </div>
