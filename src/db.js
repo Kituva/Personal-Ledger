@@ -82,13 +82,3 @@ export async function requestPersistence() {
   }
   return false;
 }
-
-/** Rough bytes used, for the Settings screen. Returns null if unavailable. */
-export async function usage() {
-  try {
-    const est = await navigator.storage?.estimate?.();
-    return est?.usage ?? null;
-  } catch {
-    return null;
-  }
-}
