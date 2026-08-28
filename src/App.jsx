@@ -972,7 +972,22 @@ function EntrySheet({ txn, cats, onSave, onDelete, onClose }) {
   const [date, setDate] = useState(txn.date || iso(new Date()));
   const [grid, setGrid] = useState(false);
   const [noting, setNoting] = useState(false);
+  const [focusNote, setFocusNote] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
+
+  // The description opens itself once the amount has a value: by then the
+  // number is decided and the only thing left to say is what it was for. It
+  // opens without taking focus, so the keypad stays live and the keyboard
+  // doesn't slide up over it. Once per sheet — reopening something you
+  // deliberately closed would be worse than never opening it. Edits start
+  // with an amount already set, so they never trigger it.
+  const autoOpened = useRef(isEdit);
+  useEffect(() => {
+    if (amt && !autoOpened.current) {
+      autoOpened.current = true;
+      setNoting(true);
+    }
+  }, [amt]);
 
   const tap = (k) => {
     if (k === "del") return setAmt((a) => a.slice(0, -1));
@@ -1011,9 +1026,6 @@ function EntrySheet({ txn, cats, onSave, onDelete, onClose }) {
         <span className={`amountval num ${amt ? "" : "zero"}`}>
           <span className="rupee">₹</span>{amt || "0"}
         </span>
-        <button className="bksp" onClick={() => tap("del")} disabled={!amt} aria-label="Backspace">
-          <Backspace />
-        </button>
       </div>
 
       <div className="metarow">
@@ -1029,8 +1041,8 @@ function EntrySheet({ txn, cats, onSave, onDelete, onClose }) {
               onChange={(e) => e.target.value && setDate(e.target.value)}
               style={{ position: "absolute", inset: 0, opacity: 0, width: "100%" }} />
           </label>
-          <button className={`chip ${note ? "on filled" : ""}`} onClick={() => setNoting((v) => !v)}>
-            📝 {note ? (note.length > 16 ? note.slice(0, 16) + "…" : note) : "Note"}
+          <button className={`chip ${note ? "on filled" : ""}`} onClick={() => { setNoting((v) => !v); setFocusNote(true); }}>
+            📝 {note ? (note.length > 16 ? note.slice(0, 16) + "…" : note) : "Description"}
           </button>
         </div>
         {isEdit && (
@@ -1045,7 +1057,7 @@ function EntrySheet({ txn, cats, onSave, onDelete, onClose }) {
 
       {noting && (
         <div style={{ padding: "0 16px 12px" }}>
-          <input className="inp" autoFocus placeholder="What was it for?" value={note}
+          <input className="inp" autoFocus={focusNote} placeholder="What was it for?" value={note}
             onChange={(e) => setNote(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && setNoting(false)} />
         </div>

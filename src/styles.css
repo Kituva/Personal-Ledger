@@ -592,7 +592,6 @@ button {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
   padding: 10px 16px;
   min-height: 96px;
 }
@@ -607,23 +606,6 @@ button {
 }
 .amountval .rupee {
   font-size: 0.52em;
-}
-.bksp {
-  width: 42px;
-  height: 30px;
-  border-radius: var(--r-pill);
-  background: var(--surface2);
-  color: var(--text2);
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-}
-.bksp:active {
-  background: var(--surface3);
-}
-.bksp:disabled {
-  opacity: 0.35;
-  cursor: default;
 }
 
 /* Dates and note scroll; delete stays put beside them. */
