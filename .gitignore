@@ -20,6 +20,9 @@ yarn-error.log*
 .idea/
 *.swp
 
+# snapshots and screenshots left behind by browser tooling
+.playwright-mcp/
+
 # os
 .DS_Store
 Thumbs.db
