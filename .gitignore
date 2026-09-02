@@ -36,3 +36,6 @@ desktop.ini
 # deploy tooling
 .vercel
 .netlify
+
+# superpowers brainstorming scratch
+.superpowers/
