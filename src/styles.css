@@ -104,7 +104,7 @@ button {
    ============================================================ */
 .shead {
   text-align: center;
-  padding: 6px 0 18px;
+  padding: 8px 0 22px;
 }
 
 .slabel {
@@ -118,7 +118,7 @@ button {
   font-weight: 700;
   letter-spacing: -0.025em;
   line-height: 1.15;
-  margin-top: 2px;
+  margin-top: 8px;
 }
 
 /* The green pill: a filled circular arrow, then the percentage, then a
@@ -130,7 +130,7 @@ button {
   gap: 6px;
   font-size: 14.5px;
   font-weight: 600;
-  margin-top: 4px;
+  margin-top: 10px;
 }
 .delta .darrow {
   width: 19px;
