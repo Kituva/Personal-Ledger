@@ -315,6 +315,22 @@ function useCountUp(target, ms = 450) {
   return val;
 }
 
+/**
+ * False on the first paint, true from the next frame on.
+ *
+ * Anything that should grow into place needs to be laid out at its start
+ * value once before the transition can run — set the end value in the same
+ * frame and the browser never sees a change to animate.
+ */
+function useGrown() {
+  const [grown, setGrown] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setGrown(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+  return grown;
+}
+
 /* ============================================================
    CSV
    ============================================================ */
@@ -442,67 +458,6 @@ function sample() {
 }
 
 /* ============================================================
-   Donut
-
-   Arcs are one circle each, sized with stroke-dasharray and rotated
-   into place with stroke-dashoffset. The gap is subtracted from every
-   arc's length so round caps don't overlap their neighbours.
-   ============================================================ */
-const D_R = 89;
-const D_SW = 11;
-const D_C = 2 * Math.PI * D_R;
-const D_GAP = 3.5;  // ~a third of the stroke, as in the reference ring
-const D_OTHER = "#7c8899";  // literal: SVG attributes don't read CSS vars
-
-function Donut({ slices, onSlice, children }) {
-  const [lit, setLit] = useState(false);
-  useEffect(() => {
-    const id = requestAnimationFrame(() => setLit(true));
-    return () => cancelAnimationFrame(id);
-  }, []);
-
-  const total = slices.reduce((s, x) => s + x.v, 0);
-  let acc = 0;
-
-  return (
-    <div className="donutwrap">
-      <svg viewBox="0 0 200 200" role="img" aria-label="Spending by category">
-        {total === 0 && (
-          <circle cx="100" cy="100" r={D_R} fill="none" stroke="var(--surface2)" strokeWidth="18" />
-        )}
-        {total > 0 && slices.map((s) => {
-          const span = (s.v / total) * D_C;
-          const start = acc;
-          acc += span;
-
-          // A round cap paints half the stroke width beyond each end of the
-          // dash. Ignore that and a slice thinner than the stroke renders
-          // wider than its share and laps its neighbour, so give the caps
-          // their room — and drop to butt caps on slices too thin to afford
-          // it. A lone slice has no neighbour to clear and keeps the ring.
-          const only = slices.length === 1;
-          const round = !only && span > D_SW + D_GAP + 1;
-          const len = only ? D_C
-            : round ? span - D_GAP - D_SW
-            : Math.max(1, span - D_GAP);
-          const lead = only ? 0 : D_GAP / 2 + (round ? D_SW / 2 : 0);
-
-          return (
-            <circle key={s.id} className="arc" cx="100" cy="100" r={D_R} fill="none"
-              stroke={s.c} strokeWidth={D_SW} strokeLinecap={round ? "round" : "butt"}
-              strokeDasharray={lit ? `${len} ${D_C}` : `0 ${D_C}`}
-              strokeDashoffset={-(start + lead)}
-              style={s.other ? { cursor: "default" } : undefined}
-              onClick={() => !s.other && onSlice?.(s.id)} />
-          );
-        })}
-      </svg>
-      <div className="donutmid">{children}</div>
-    </div>
-  );
-}
-
-/* ============================================================
    Bar chart
 
    The ghost track behind each bar keeps the shape of the period
@@ -620,17 +575,32 @@ function Delta({ pct, from, goodDown = true }) {
   );
 }
 
-function CatRow({ id, v, n, pct, onTap }) {
+/**
+ * One category: icon, name, its bar, and the money.
+ *
+ * The bar is the chart — there is no separate one. `share` is this
+ * category's length as a percentage of the longest bar on screen, so the
+ * row carries the comparison the ring used to, at the size of the whole
+ * row rather than the width of a stroke.
+ */
+function CatRow({ id, v, n, pct, share, grown, onTap }) {
   const c = CAT[id];
   return (
     <button className="catrow" onClick={() => onTap?.(id)}>
       <span className="tile" style={{ color: c?.c, background: tint(c?.c) }}>{c?.e}</span>
-      <span style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8 }}>
-        <span className="catname">{c?.name}</span>
-        <span className="count num">{n}</span>
+      <span className="catmid">
+        <span className="catline">
+          <span className="catname">{c?.name}</span>
+          <span className="count num">{n}</span>
+        </span>
+        <span className="track">
+          <span className="fill" style={{ width: grown ? `${share}%` : 0, background: c?.c }} />
+        </span>
       </span>
-      <span className="num" style={{ fontSize: 15.5, fontWeight: 600 }}>₹{money(v)}</span>
-      <span className="pct num">{pct}%</span>
+      <span className="catval">
+        <span className="catamt num">₹{money(v)}</span>
+        <span className="pct num">{pct}%</span>
+      </span>
     </button>
   );
 }
@@ -702,6 +672,7 @@ function PeriodNav({ f, right }) {
 function Summary({ f, cur, prevTotal, onPick, onDrill }) {
   const total = cur.reduce((s, t) => s + t.amount, 0);
   const shown = useCountUp(total);
+  const grown = useGrown();
   const delta = prevTotal ? Math.round(((total - prevTotal) / prevTotal) * 100) : null;
 
   const byCat = useMemo(() => {
@@ -713,29 +684,22 @@ function Summary({ f, cur, prevTotal, onPick, onDrill }) {
     return Object.entries(m).sort((a, b) => b[1].v - a[1].v);
   }, [cur]);
 
-  const slices = useMemo(() => {
-    // A slice needs a dash body at least as long as the stroke is thick
-    // before it reads as an arc: any shorter and its two round caps meet,
-    // painting a dot. Everything below that folds into one aggregate.
-    const min = total * ((2 * D_SW + D_GAP) / D_C);
-    const out = byCat.filter(([, x]) => x.v >= min).map(([id, x]) => ({ id, v: x.v, c: CAT[id]?.c }));
-    const tail = byCat.filter(([, x]) => x.v < min);
-    if (tail.length) {
-      out.push({ id: "__other", v: tail.reduce((a, [, x]) => a + x.v, 0), c: D_OTHER, other: true });
-    }
-    return out;
-  }, [byCat, total]);
+  // Bars are measured against the biggest category, not against the total.
+  // A top share of a quarter is normal, and scaling by the total would
+  // leave three quarters of every row empty — throwing away the width that
+  // makes two lengths worth comparing. Exact share is on the row already.
+  const peak = byCat.length ? byCat[0][1].v : 0;
   const noun = f.kind === "expense" ? "Expenses" : "Income";
 
   return (
     <div className="scroll">
       <PeriodNav f={f} />
 
-      <Donut slices={slices} onSlice={onDrill}>
-        <span className="slabel">{noun} {f.range.label}</span>
-        <span className="stotal num" style={{ fontSize: 38 }}>₹{money(shown)}</span>
+      <div className="shead">
+        <div className="slabel">{noun} {f.range.label}</div>
+        <div className="stotal num">₹{money(shown)}</div>
         <Delta pct={delta} from={f.range.from} goodDown={f.kind === "expense"} />
-      </Donut>
+      </div>
 
       <Filters f={f} onPick={onPick} />
 
@@ -746,7 +710,8 @@ function Summary({ f, cur, prevTotal, onPick, onDrill }) {
         </div>
       ) : (
         byCat.map(([id, x]) => (
-          <CatRow key={id} id={id} v={x.v} n={x.n}
+          <CatRow key={id} id={id} v={x.v} n={x.n} grown={grown}
+            share={(x.v / peak) * 100}
             pct={((x.v / total) * 100).toFixed(2)} onTap={onDrill} />
         ))
       )}
