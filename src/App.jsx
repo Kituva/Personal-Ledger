@@ -33,6 +33,12 @@ const tint = (hex, a = 0.16) => {
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
 };
 
+/* --neg and --pos again, in hex. The calendar shades its cells at a dozen
+   alphas per screen, and `tint` needs a number to do that — a CSS variable
+   can't be read from here. Keep these in step with styles.css. */
+const NEG = "#ff5a5f";
+const POS = "#2ecc71";
+
 /* ============================================================
    Dates and formatting
    ============================================================ */
@@ -71,7 +77,7 @@ function relDay(dstr) {
    grain, the chevrons step through it, and both charts and totals read
    from the same window — so Summary and Entries can never disagree.
    ============================================================ */
-const PERIODS = [["w","Weekly"],["m","Monthly"],["q","Quarterly"],["y","Yearly"]];
+const PERIODS = [["d","Daily"],["w","Weekly"],["m","Monthly"],["q","Quarterly"],["y","Yearly"]];
 
 const endOfDay = (d) => { const x = new Date(d); x.setHours(23, 59, 59, 999); return x; };
 
@@ -83,6 +89,18 @@ function startOfWeek(d) {
 
 function periodRange(p, off) {
   const now = new Date();
+
+  if (p === "d") {
+    const s = new Date(now.getFullYear(), now.getMonth(), now.getDate() + off);
+    const ps = new Date(s); ps.setDate(ps.getDate() - 1);
+    const name = relDay(iso(s));
+    return {
+      start: s, end: endOfDay(s), prevStart: ps, prevEnd: endOfDay(ps),
+      title: name,
+      label: off === 0 || off === -1 ? name.toLowerCase() : `on ${name}`,
+      from: "yesterday",
+    };
+  }
 
   if (p === "w") {
     const s = startOfWeek(now); s.setDate(s.getDate() + off * 7);
@@ -141,6 +159,10 @@ function periodRange(p, off) {
 function bucketize(p, range, list) {
   const { start, end } = range;
   const out = [];
+
+  // A day has no columns. Entries record a date and never a time, so there
+  // is nothing to divide one into — the Daily screen draws no chart at all.
+  if (p === "d") return out;
 
   if (p === "w" || p === "m") {
     const n = p === "w" ? 7 : end.getDate();
@@ -502,6 +524,161 @@ function Bars({ buckets, avg, colour = "var(--text)", sel, onSel, height = 150 }
 }
 
 /* ============================================================
+   Spending calendar
+
+   The bar chart answers "how much, and when". This answers "which
+   days" — the same daily totals arranged by weekday, so a heavy
+   Saturday habit or a first-of-the-month rent reads as a column
+   instead of a spike you have to count along the axis to place.
+
+   Past a month a cell is too small for a number and too small to aim
+   at, so the month becomes both the mark and the target.
+   ============================================================ */
+
+/** Daily totals, keyed by ISO date. */
+function dayTotals(list) {
+  const m = {};
+  list.forEach((t) => { m[t.date] = (m[t.date] || 0) + t.amount; });
+  return m;
+}
+
+/* One rent day is forty times an ordinary one. On a straight scale that
+   leaves every other day at the same invisible tint — one red square and
+   thirty blanks. The root keeps rent darkest and still separates a ₹400
+   day from a ₹2,000 one. */
+const weight = (v, peak) => Math.sqrt(v / peak);
+
+/* A cell is about 47px across on a phone, which holds "9,999" at the base
+   size. Rather than round the number away or let it spill, the longer ones
+   step the type down — a rent day is one cell a month, and reading ₹56,000
+   a shade smaller beats reading "56k". */
+const amtSize = (s) => (s.length > 7 ? "xs" : s.length > 5 ? "sm" : "");
+
+/**
+ * Days as cells, weeks as rows.
+ *
+ * `days` is what to draw and `totals` is what to draw in it. They are
+ * separate because on a Daily window the grid shows a whole month while
+ * the screen behind it is one day of that month.
+ */
+function SpendCalendar({ days, totals, colour, sel, onSel }) {
+  const today = iso(new Date());
+  const peak = Math.max(...days.map((k) => totals[k] || 0), 1);
+  const lead = (parseISO(days[0]).getDay() + 6) % 7;
+
+  return (
+    <div className="spendcal">
+      <div className="caldow">
+        {[1, 2, 3, 4, 5, 6, 0].map((i) => <span key={i}>{DOW[i].slice(0, 2)}</span>)}
+      </div>
+      <div className="scgrid">
+        {Array.from({ length: lead }, (_, i) => <span key={`p${i}`} className="scday pad" />)}
+        {days.map((k) => {
+          const v = totals[k] || 0;
+          const future = k > today;
+          const w = weight(v, peak);
+          const on = sel === k;
+          return (
+            <button key={k} disabled={future} onClick={() => onSel(k)}
+              className={`scday${on ? " sel" : ""}${sel && !on ? " dim" : ""}`
+                + `${future ? " fut" : ""}${k === today && !on ? " now" : ""}`}
+              style={on || !v ? undefined : { background: tint(colour, 0.05 + 0.26 * w) }}
+              aria-label={`${relDay(k)}, ${money(v)} rupees`}>
+              <span className="scdate">{parseISO(k).getDate()}</span>
+              {v ? (
+                <span className={`scamt num ${amtSize(money(v))}`}
+                  style={on ? undefined : { color: colour, opacity: 0.58 + 0.42 * w }}>
+                  {money(v)}
+                </span>
+              ) : (
+                <span className="scnil">{future ? "" : "·"}</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** The same grid, small: colour alone, and the month is the tap target. */
+function MiniMonths({ months, totals, colour, onOpen }) {
+  const today = iso(new Date());
+
+  // Every month gets six rows whether it needs them or not. Four rows next
+  // to six leaves twelve labels at nine different heights, and the thing
+  // stops reading as a grid.
+  const grids = months.map(({ y, m }) => {
+    const cells = Array((new Date(y, m, 1).getDay() + 6) % 7).fill(null);
+    for (let d = 1; d <= new Date(y, m + 1, 0).getDate(); d++) cells.push(iso(new Date(y, m, d)));
+    while (cells.length < 42) cells.push(null);
+    return { y, m, cells };
+  });
+
+  // One scale across the whole window, so a dark March and a dark July mean
+  // the same rupees and the months can be read against each other.
+  const peak = Math.max(...grids.flatMap((g) => g.cells.map((k) => (k ? totals[k] || 0 : 0))), 1);
+
+  return (
+    <div className="scmonths">
+      {grids.map(({ y, m, cells }) => (
+        <button key={`${y}-${m}`} className="scmini" onClick={() => onOpen(y, m)}
+          aria-label={`Open ${MONTHS[m]} ${y}`}>
+          <span className="scmlabel">{MON[m]}</span>
+          <span className="scmgrid">
+            {cells.map((k, i) => {
+              const v = k && k <= today ? totals[k] || 0 : 0;
+              return <span key={k || `p${i}`} className={`scmday${!k || k > today ? " pad" : ""}`}
+                style={v ? { background: tint(colour, 0.10 + 0.55 * weight(v, peak)) } : undefined} />;
+            })}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Picks the calendar that fits the window: days with numbers in them up to
+ * a month, small months beyond that.
+ *
+ * `pool` is every transaction the screen cares about, narrowed by kind and
+ * category but not by date — the Daily grid reaches outside its own window
+ * and needs the days either side of it.
+ */
+function SpendGrid({ f, pool, buckets, sel, onSel, colour, onOpenMonth }) {
+  const totals = useMemo(() => dayTotals(pool), [pool]);
+  const { period, range } = f;
+
+  if (period === "d") {
+    // The one place the grid shows more than the window. A single day is a
+    // single cell, so it draws the month around it and dims the rest —
+    // those days are context, and they are there to be tapped.
+    const s = range.start;
+    const days = [];
+    for (let d = 1; d <= new Date(s.getFullYear(), s.getMonth() + 1, 0).getDate(); d++) {
+      days.push(iso(new Date(s.getFullYear(), s.getMonth(), d)));
+    }
+    return <SpendCalendar days={days} totals={totals} colour={colour}
+      sel={iso(s)} onSel={f.openDay} />;
+  }
+
+  if (period === "w" || period === "m") {
+    const days = buckets.map((b) => b.from);
+    return <SpendCalendar days={days} totals={totals} colour={colour}
+      sel={sel === null ? null : days[sel]}
+      onSel={(k) => onSel(days.indexOf(k) === sel ? null : days.indexOf(k))} />;
+  }
+
+  const months = [];
+  for (let d = new Date(range.start.getFullYear(), range.start.getMonth(), 1);
+    d <= range.end; d.setMonth(d.getMonth() + 1)) {
+    months.push({ y: d.getFullYear(), m: d.getMonth() });
+  }
+  return <MiniMonths months={months} totals={totals} colour={colour} onOpen={onOpenMonth} />;
+}
+
+/* ============================================================
    Filter pills
    ============================================================ */
 function Filters({ f, onPick, showCat = true }) {
@@ -722,9 +899,16 @@ function Summary({ f, cur, prevTotal, onPick, onDrill }) {
 /* ============================================================
    Entries
    ============================================================ */
-function Entries({ f, cur, onPick, onTap }) {
+function Entries({ f, txns, cur, onPick, onTap }) {
   const [sel, setSel] = useState(null);
   const buckets = useMemo(() => bucketize(f.period, f.range, cur), [f.period, f.range, cur]);
+
+  // The calendar's supply: the same narrowing the window uses, minus the
+  // dates, because on Daily the grid draws the month around the chosen day.
+  const pool = useMemo(
+    () => txns.filter((t) => t.type === f.kind && (!f.catFilter || t.cat === f.catFilter)),
+    [txns, f.kind, f.catFilter],
+  );
 
   // Reset the bar selection whenever the window underneath it changes.
   useEffect(() => { setSel(null); }, [f.period, f.off, f.kind, f.catFilter]);
@@ -751,7 +935,10 @@ function Entries({ f, cur, onPick, onTap }) {
         <div className="stotal num">₹{money(shown)}</div>
       </div>
 
-      <Bars buckets={buckets} avg={avg} sel={sel} onSel={setSel} />
+      {f.period !== "d" && <Bars buckets={buckets} avg={avg} sel={sel} onSel={setSel} />}
+
+      <SpendGrid f={f} pool={pool} buckets={buckets} sel={sel} onSel={setSel}
+        colour={f.kind === "expense" ? NEG : POS} onOpenMonth={f.openMonth} />
 
       <Filters f={f} onPick={onPick} />
 
@@ -795,6 +982,11 @@ function CategoryDetail({ f, txns, id, onBack, onTap, onPick }) {
   const elapsed = buckets.filter((b) => b.from <= today);
   const avg = elapsed.length ? elapsed.reduce((s, b) => s + b.v, 0) / elapsed.length : 0;
 
+  const pool = useMemo(
+    () => txns.filter((t) => t.cat === id && t.type === f.kind),
+    [txns, id, f.kind],
+  );
+
   return (
     <div className="scroll">
       <div className="navrow">
@@ -812,7 +1004,10 @@ function CategoryDetail({ f, txns, id, onBack, onTap, onPick }) {
         <Delta pct={delta} from={f.range.from} goodDown={f.kind === "expense"} />
       </div>
 
-      <Bars buckets={buckets} avg={avg} colour={c?.c} sel={null} />
+      {f.period !== "d" && <Bars buckets={buckets} avg={avg} colour={c?.c} sel={null} />}
+
+      <SpendGrid f={f} pool={pool} buckets={buckets} sel={null} onSel={() => {}}
+        colour={c?.c} onOpenMonth={f.openMonth} />
 
       <Filters f={f} onPick={onPick} showCat={false} />
 
@@ -1162,8 +1357,24 @@ export default function App() {
   // "3 quarters ago" because you were 3 months back is never what you meant.
   const changePeriod = (p) => { setPeriod(p); setOff(0); };
 
+  // Opening a cell from a calendar has to set the grain and the offset in
+  // one go — changePeriod would reset you to today's month or today's date,
+  // which is never where you just tapped.
+  const openMonth = (y, m) => {
+    const n = new Date();
+    setPeriod("m");
+    setOff((y - n.getFullYear()) * 12 + (m - n.getMonth()));
+  };
+
+  const openDay = (k) => {
+    const n = new Date(); n.setHours(0, 0, 0, 0);
+    setPeriod("d");
+    setOff(Math.round((parseISO(k) - n) / 864e5));
+  };
+
   const range = useMemo(() => periodRange(period, off), [period, off]);
-  const f = { period, setPeriod: changePeriod, off, setOff, kind, setKind, catFilter, setCatFilter, range };
+  const f = { period, setPeriod: changePeriod, off, setOff, kind, setKind, catFilter, setCatFilter,
+    range, openMonth, openDay };
 
   const cur = useMemo(() => txns.filter((t) => {
     const d = parseISO(t.date);
@@ -1225,7 +1436,7 @@ export default function App() {
           {tab === "summary" && (
             <Summary f={f} cur={cur} prevTotal={prevTotal} onPick={setPicker} onDrill={setDrill} />
           )}
-          {tab === "entries" && <Entries f={f} cur={cur} onPick={setPicker} onTap={setEditing} />}
+          {tab === "entries" && <Entries f={f} txns={txns} cur={cur} onPick={setPicker} onTap={setEditing} />}
           {tab === "settings" && <SettingsScreen txns={txns} onReplace={replaceAll} onAdd={addMany} />}
         </>
       )}
