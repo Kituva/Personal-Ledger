@@ -44,17 +44,63 @@ persistent storage, and the safe-area handling around the notch.
 | `src/styles.css` | All styling. |
 | `vite.config.js` | Manifest and service worker via `vite-plugin-pwa`. |
 
-## Bringing in Expenses001.xlsx
+## The CSV format
 
-Save the Expense List sheet as CSV, then Settings → **Import CSV**.
+Six columns, both directions: **Date, Amount, Category, Description, Month,
+Year**. Only the first four are read on the way in — Month and Year exist for
+the spreadsheet's benefit and are recomputed from the date.
 
-Columns are read positionally as **Date, Amount, Category, Description**. Dates
-in `DD-MM-YYYY`, `DD/MM/YYYY` or `YYYY-MM-DD` all work. A negative amount
-imports as income. Category names are matched against the fourteen below;
-anything unrecognised lands in Miscellaneous.
+Dates in `DD-MM-YYYY`, `DD/MM/YYYY` or `YYYY-MM-DD` all work. A negative
+amount imports as income. Category names are matched against the fourteen
+below; anything unrecognised lands in Miscellaneous.
 
-Export writes the same six columns back, so a round trip through CSV loses
-nothing.
+Import **adds** to what's already there. It doesn't replace and it doesn't
+deduplicate, so importing the same file twice leaves you with two of
+everything. Settings → **Start fresh** is the way back.
+
+## Bringing in a spreadsheet
+
+Columns are read **positionally** — first Date, second Amount, third Category,
+fourth Description. That's the catch: it only works when the table starts in
+the very first column.
+
+`Expenses001.xlsx` doesn't. Column A is an empty spacer, the table starts at
+B, the header sits on row 2, and a stray month list lives out in column AD.
+Excel writes the whole used range, so a plain Save As → CSV shifts every value
+one place to the right — the importer reads column one, finds an empty cell,
+and skips all 3,091 rows without saying why. That failure is silent and looks
+exactly like a corrupt file.
+
+So flatten it first: those four columns, in that order, starting at column A,
+header on line 1, nothing else in the sheet.
+
+Done once, September 2026 — 1,167 entries spanning January 2025 to August 2026.
+Six of them carry the description *Not Known*, which the spreadsheet had left
+blank; three of those six had no category either and sit in Miscellaneous.
+
+## Keeping the spreadsheet up to date
+
+The app is the record now and the spreadsheet is the archive, so the traffic
+runs the other way. Settings → **Export CSV** writes `Expenses-YYYY-MM-DD.csv`.
+That file is also the only backup there is, which is reason enough to do it
+regularly.
+
+Three things to watch when pasting an export back into `Expenses001.xlsx`:
+
+**It's always the whole ledger.** Export writes every entry, oldest first —
+not what changed since last time. You are replacing the sheet's contents, not
+appending to them. Clear from row 3 down before pasting, or keep each dated
+export as its own file and treat the newest as the truth.
+
+**Paste into B–E only.** Month and Year are formulas in that sheet. The export
+carries them as plain text, and pasting all six columns would overwrite
+working formulas with dead values. Leave F and G to recalculate.
+
+**Check the dates on the first paste.** The export writes day first, so
+`08-04-2025` is the 8th of April. An Excel reading dates US-style turns that
+into the 4th of August and won't mention it. Confirm against a row you
+recognise; if it's wrong, paste through Data → Text to Columns with the date
+format set to DMY.
 
 ## Categories
 
