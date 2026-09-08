@@ -1334,7 +1334,7 @@ export default function CategorySheet({ cat, side, txns, onSave, onClose }) {
 
   const missing =
     !name.trim() ? "Give it a name"
-    : !nameAvailable(name, type, cats, cat?.id) ? `You already have a ${type} category called that`
+    : !nameAvailable(name, type, cats, cat?.id) ? `You already have an ${type} category called that`
     : null;
   const valid = !missing;
 
@@ -1646,7 +1646,7 @@ Run: `npm run dev`, then Settings → Categories:
 - Adding from the Income section opens the sheet already on Income; saving puts
   the new category at the bottom of the Income list, with a colour assigned.
 - Naming a new category "Salary" on the Income side greys out the tick and the
-  hint reads "You already have a income category called that".
+  hint reads "You already have an income category called that".
 - The back arrow returns to Settings, and tapping a bottom-bar tab leaves the
   screen entirely.
 
