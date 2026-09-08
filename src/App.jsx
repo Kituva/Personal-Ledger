@@ -1171,6 +1171,7 @@ function EntrySheet({ txn, onSave, onDelete, onClose }) {
   const [cal, setCal] = useState(false);
 
   const choices = type === "income" ? income : expense;
+  const sel = cat ? choices.find((c) => c.id === cat) : null;
 
   const tap = (k) => {
     if (k === "del") return setAmt((a) => a.slice(0, -1));
@@ -1185,7 +1186,7 @@ function EntrySheet({ txn, onSave, onDelete, onClose }) {
   // sheet asks for them, so the greyed-out tick is never a mystery.
   const missing =
     !(parseFloat(amt) > 0) ? "Enter an amount"
-    : !cat ? "Pick a category"
+    : !sel ? "Pick a category"
     : !note.trim() ? "Add a description"
     : null;
   const valid = !missing;
@@ -1196,7 +1197,6 @@ function EntrySheet({ txn, onSave, onDelete, onClose }) {
   };
 
   const dates = [0, 1].map((o) => { const d = new Date(); d.setDate(d.getDate() - o); return iso(d); });
-  const sel = cat ? choices.find((c) => c.id === cat) : null;
 
   return (
     <div className="sheet">
@@ -1206,9 +1206,9 @@ function EntrySheet({ txn, onSave, onDelete, onClose }) {
         <button className="iconbtn" onClick={onClose} aria-label="Cancel"><Close /></button>
         <div className="seg" style={{ maxWidth: 210 }}>
           <button className={`segbtn ${type === "expense" ? "on" : ""}`}
-            onClick={() => { setType("expense"); setCat(null); }}>Spent</button>
+            onClick={() => { if (type !== "expense") { setType("expense"); setCat(null); } }}>Spent</button>
           <button className={`segbtn ${type === "income" ? "on" : ""}`}
-            onClick={() => { setType("income"); setCat(null); }}>Received</button>
+            onClick={() => { if (type !== "income") { setType("income"); setCat(null); } }}>Received</button>
         </div>
         <button className="iconbtn" onClick={submit} disabled={!valid}
           aria-label={missing || "Save"} title={missing || "Save"}
