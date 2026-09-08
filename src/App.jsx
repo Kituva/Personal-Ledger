@@ -1170,6 +1170,8 @@ function EntrySheet({ txn, onSave, onDelete, onClose }) {
   const [confirmDel, setConfirmDel] = useState(false);
   const [cal, setCal] = useState(false);
 
+  const choices = type === "income" ? income : expense;
+
   const tap = (k) => {
     if (k === "del") return setAmt((a) => a.slice(0, -1));
     if (k === "." && amt.includes(".")) return;
@@ -1194,7 +1196,7 @@ function EntrySheet({ txn, onSave, onDelete, onClose }) {
   };
 
   const dates = [0, 1].map((o) => { const d = new Date(); d.setDate(d.getDate() - o); return iso(d); });
-  const sel = cat ? [...expense, ...income].find((c) => c.id === cat) : null;
+  const sel = cat ? choices.find((c) => c.id === cat) : null;
 
   return (
     <div className="sheet">
@@ -1203,8 +1205,10 @@ function EntrySheet({ txn, onSave, onDelete, onClose }) {
       <div className="sheettop">
         <button className="iconbtn" onClick={onClose} aria-label="Cancel"><Close /></button>
         <div className="seg" style={{ maxWidth: 210 }}>
-          <button className={`segbtn ${type === "expense" ? "on" : ""}`} onClick={() => setType("expense")}>Spent</button>
-          <button className={`segbtn ${type === "income" ? "on" : ""}`} onClick={() => setType("income")}>Received</button>
+          <button className={`segbtn ${type === "expense" ? "on" : ""}`}
+            onClick={() => { setType("expense"); setCat(null); }}>Spent</button>
+          <button className={`segbtn ${type === "income" ? "on" : ""}`}
+            onClick={() => { setType("income"); setCat(null); }}>Received</button>
         </div>
         <button className="iconbtn" onClick={submit} disabled={!valid}
           aria-label={missing || "Save"} title={missing || "Save"}
@@ -1271,7 +1275,7 @@ function EntrySheet({ txn, onSave, onDelete, onClose }) {
 
       {grid && (
         <div className="catgrid">
-          {[...expense, ...income].map((c) => (
+          {choices.map((c) => (
             <button key={c.id} className={`gopt ${c.id === cat ? "on" : ""}`}
               onClick={() => { setCat(c.id); setGrid(false); }}>
               <span className="tile sm" style={{ color: c.c, background: tint(c.c) }}>{c.e}</span>
