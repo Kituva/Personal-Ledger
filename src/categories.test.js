@@ -3,6 +3,7 @@ import {
   DEFAULT_CATS, PALETTE, makeCategory, nextColour, bySide,
   nameAvailable, canDelete, canChangeSide, resolveImportCategory, lastGrapheme,
 } from "./categories.js";
+import { parseCsv } from "./App.jsx";
 
 const expenseSide = () => DEFAULT_CATS.filter((c) => c.side === "expense");
 const incomeSide = () => DEFAULT_CATS.filter((c) => c.side === "income");
@@ -247,5 +248,56 @@ describe("lastGrapheme", () => {
     } finally {
       Intl.Segmenter = real;
     }
+  });
+});
+
+describe("parseCsv", () => {
+  const header = "Date,Amount,Category,Description\n";
+
+  it("routes a negative amount to the income side", () => {
+    const { rows } = parseCsv(header + '"01-09-2026","-132000","Salary","September"', DEFAULT_CATS);
+    expect(rows[0].type).toBe("income");
+    expect(rows[0].cat).toBe("salary");
+    expect(rows[0].amount).toBe(132000);
+  });
+
+  it("routes a positive amount to the expense side", () => {
+    const { rows } = parseCsv(header + '"01-09-2026","260","Dining Out","Swiggy"', DEFAULT_CATS);
+    expect(rows[0].type).toBe("expense");
+    expect(rows[0].cat).toBe("dining");
+  });
+
+  it("creates a category the list does not have, and reports it", () => {
+    const { rows, newCats } = parseCsv(
+      header + '"01-09-2026","-5000","Freelance","Website"', DEFAULT_CATS);
+    expect(newCats).toHaveLength(1);
+    expect(newCats[0].name).toBe("Freelance");
+    expect(newCats[0].side).toBe("income");
+    expect(rows[0].cat).toBe(newCats[0].id);
+  });
+
+  it("creates a repeated new name only once", () => {
+    const { rows, newCats } = parseCsv(
+      header +
+      '"01-09-2026","-5000","Freelance","Website"\n' +
+      '"02-09-2026","-2000","freelance","Logo"', DEFAULT_CATS);
+    expect(newCats).toHaveLength(1);
+    expect(rows[0].cat).toBe(rows[1].cat);
+  });
+
+  it("falls back rather than creating when the name is blank", () => {
+    const { rows, newCats } = parseCsv(header + '"01-09-2026","260","","Something"', DEFAULT_CATS);
+    expect(newCats).toHaveLength(0);
+    expect(rows[0].cat).toBe("misc");
+  });
+
+  it("still skips rows with no usable date or amount", () => {
+    const { rows, skipped } = parseCsv(
+      header +
+      '"not a date","260","Dining Out","x"\n' +
+      '"01-09-2026","0","Dining Out","y"\n' +
+      '"01-09-2026","260","Dining Out","z"', DEFAULT_CATS);
+    expect(rows).toHaveLength(1);
+    expect(skipped).toBe(2);
   });
 });

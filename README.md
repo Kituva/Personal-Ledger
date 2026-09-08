@@ -50,9 +50,16 @@ Six columns, both directions: **Date, Amount, Category, Description, Month,
 Year**. Only the first four are read on the way in — Month and Year exist for
 the spreadsheet's benefit and are recomputed from the date.
 
-Dates in `DD-MM-YYYY`, `DD/MM/YYYY` or `YYYY-MM-DD` all work. A negative
-amount imports as income. Category names are matched against the fourteen
-below; anything unrecognised lands in Miscellaneous.
+Dates in `DD-MM-YYYY`, `DD/MM/YYYY` or `YYYY-MM-DD` all work. A negative amount
+imports as income, and that sign also decides which half of the category list
+the name is matched against — an income row never matches an expense category.
+
+A name that matches nothing on its side is **created** as a new category, and
+the import summary says how many it made. That is deliberate: an export is the
+only backup there is, so an import that couldn't restore your own categories
+would quietly lose them. The cost is that a typo in a hand-edited sheet becomes
+a category you have to go and delete. A blank category cell falls back to
+Miscellaneous, or Other income on a negative amount.
 
 Import **adds** to what's already there. It doesn't replace and it doesn't
 deduplicate, so importing the same file twice leaves you with two of

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import * as db from "./db.js";
-import { CatsContext, useCats, bySide, tint } from "./categories.js";
+import { CatsContext, useCats, bySide, tint, resolveImportCategory } from "./categories.js";
 import {
   Chevron, Arrow, Plus, PieIcon, ListIcon, GearIcon,
   Backspace, GridIcon, Reset, Check, Trash, Close,
@@ -271,14 +271,24 @@ function readDate(s) {
  * Reads the Expenses001 column order: Date, Amount, Category, Description.
  * A negative amount is treated as income. Rows without a usable date or
  * amount are counted as skipped rather than silently dropped.
+ *
+ * A category name the list does not have is created rather than collapsed
+ * into a fallback — the exported CSV is this app's only backup, and an import
+ * that could not restore your own categories would make that backup lossy.
+ * Returned in `newCats`, which the caller must save before the rows.
  */
-function parseCsv(text, cats) {
+export function parseCsv(text, cats) {
   const lines = text.split(/\r?\n/).filter((l) => l.trim());
-  if (!lines.length) return { rows: [], skipped: 0 };
+  if (!lines.length) return { rows: [], skipped: 0, newCats: [] };
 
   let start = 0;
   const head = splitCsvLine(lines[0]).map((h) => h.toLowerCase());
   if (head.includes("date") || head.includes("amount")) start = 1;
+
+  /* Mutated as categories are created, so two rows naming the same new
+     category share one rather than creating it twice. */
+  const work = [...cats];
+  const newCats = [];
 
   const rows = [];
   let skipped = 0;
@@ -287,17 +297,21 @@ function parseCsv(text, cats) {
     const date = readDate(c[0]);
     const raw = parseFloat((c[1] || "").replace(/[₹,\s]/g, ""));
     if (!date || !isFinite(raw) || raw === 0) { skipped++; continue; }
-    const catName = (c[2] || "").toLowerCase().trim();
+
+    const side = raw < 0 ? "income" : "expense";
+    const { cat, created } = resolveImportCategory(c[2], side, work);
+    if (created) newCats.push(created);
+
     rows.push({
       id: uid(),
       amount: Math.abs(raw),
-      type: raw < 0 ? "income" : "expense",
-      cat: cats.find((c) => c.name.toLowerCase() === catName)?.id || "misc",
+      type: side,
+      cat: cat.id,
       note: c[3] || "",
       date,
     });
   }
-  return { rows, skipped };
+  return { rows, skipped, newCats };
 }
 
 function toCsv(txns, byId) {
@@ -903,7 +917,7 @@ function CategoryDetail({ f, txns, id, onBack, onTap, onPick }) {
    Settings
    ============================================================ */
 function SettingsScreen({ txns, onReplace, onAdd, onCategories }) {
-  const { cats, byId } = useCats();
+  const { cats, byId, addCat: onAddCat } = useCats();
   const [confirm, setConfirm] = useState(false);
   const [msg, setMsg] = useState(null);
   const fileRef = useRef(null);
@@ -921,10 +935,17 @@ function SettingsScreen({ txns, onReplace, onAdd, onCategories }) {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const { rows, skipped } = parseCsv(await file.text(), cats);
+      const { rows, skipped, newCats } = parseCsv(await file.text(), cats);
       if (!rows.length) { setMsg("No usable rows found. Expected Date, Amount, Category, Description."); return; }
+      /* Categories first — a row saved before the category it points at would
+         render with no name and no colour until the next reload. */
+      for (const c of newCats) await onAddCat(c);
       await onAdd(rows);
-      setMsg(`Imported ${rows.length} entries${skipped ? `, skipped ${skipped}` : ""}.`);
+      setMsg(
+        `Imported ${rows.length} entries` +
+        `${newCats.length ? `, added ${newCats.length} ${newCats.length === 1 ? "category" : "categories"}` : ""}` +
+        `${skipped ? `, skipped ${skipped}` : ""}.`
+      );
     } catch {
       setMsg("Couldn't read that file.");
     } finally {
@@ -969,7 +990,8 @@ function SettingsScreen({ txns, onReplace, onAdd, onCategories }) {
           <span>
             Import CSV
             <span className="rowsub" style={{ display: "block" }}>
-              Adds to what's here. Negative amounts import as income.
+              Adds to what's here. Negative amounts import as income, and
+              unknown categories are created.
             </span>
           </span>
           <Chevron dir="right" size={16} />
