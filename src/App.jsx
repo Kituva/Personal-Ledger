@@ -357,17 +357,18 @@ const WEIGHTS = { dining:26, groceries:12, transport:16, subs:3, utilities:3, ho
  * back as an entry pointing at nothing.
  */
 function sample(cats) {
-  const has = new Set(cats.map((c) => c.id));
+  const expenseIds = new Set(bySide(cats, "expense").map((c) => c.id));
   const pool = [];
   Object.entries(WEIGHTS).forEach(([k, w]) => {
-    if (!has.has(k)) return;
+    if (!expenseIds.has(k)) return;
     for (let i = 0; i < w; i++) pool.push(k);
   });
   if (!pool.length) return [];
 
-  /* Salary if it is still there, otherwise whatever the income side starts
-     with — the demo should show money coming in either way. */
-  const incomeCat = has.has("salary") ? "salary" : bySide(cats, "income")[0]?.id;
+  /* Salary if it is still an income category, otherwise whatever the income
+     side starts with — the demo should show money coming in either way. */
+  const incomeSide = bySide(cats, "income");
+  const incomeCat = incomeSide.find((c) => c.id === "salary")?.id || incomeSide[0]?.id;
 
   const out = []; const now = new Date();
   for (let back = 104; back >= 0; back--) {
@@ -380,8 +381,8 @@ function sample(cats) {
       const [name, lo, hi] = SAMPLE[cat][Math.floor(Math.random() * SAMPLE[cat].length)];
       out.push({ id: uid(), amount: Math.round((lo + Math.random() * (hi - lo)) / 10) * 10, type: "expense", cat, note: name, date: iso(d) });
     }
-    if (d.getDate() === 3 && has.has("home")) out.push({ id: uid(), amount: 28000, type: "expense", cat: "home", note: "Rent", date: iso(d) });
-    if (d.getDate() === 5 && has.has("invest")) out.push({ id: uid(), amount: 10000, type: "expense", cat: "invest", note: "SIP", date: iso(d) });
+    if (d.getDate() === 3 && expenseIds.has("home")) out.push({ id: uid(), amount: 28000, type: "expense", cat: "home", note: "Rent", date: iso(d) });
+    if (d.getDate() === 5 && expenseIds.has("invest")) out.push({ id: uid(), amount: 10000, type: "expense", cat: "invest", note: "SIP", date: iso(d) });
     if (d.getDate() === 1 && incomeCat) out.push({ id: uid(), amount: 132000, type: "income", cat: incomeCat, note: "Salary", date: iso(d) });
   }
   return out;
