@@ -5,6 +5,7 @@ import {
   Chevron, Arrow, Plus, PieIcon, ListIcon, GearIcon,
   Backspace, GridIcon, Reset, Check, Trash, Close,
 } from "./icons.jsx";
+import CategoriesScreen from "./CategoriesScreen.jsx";
 
 /* --neg and --pos again, in hex. The calendar shades its cells at a dozen
    alphas per screen, and `tint` needs a number to do that — a CSS variable
@@ -901,7 +902,7 @@ function CategoryDetail({ f, txns, id, onBack, onTap, onPick }) {
 /* ============================================================
    Settings
    ============================================================ */
-function SettingsScreen({ txns, onReplace, onAdd }) {
+function SettingsScreen({ txns, onReplace, onAdd, onCategories }) {
   const { cats, byId } = useCats();
   const [confirm, setConfirm] = useState(false);
   const [msg, setMsg] = useState(null);
@@ -948,6 +949,19 @@ function SettingsScreen({ txns, onReplace, onAdd }) {
       </div>
 
       {msg && <div style={{ padding: "0 4px 14px", fontSize: 13.5, color: "var(--pos)" }}>{msg}</div>}
+
+      <div className="sect">Setup</div>
+      <div className="setcard">
+        <button className="row" onClick={onCategories}>
+          <span>
+            Categories
+            <span className="rowsub" style={{ display: "block" }}>
+              Add, rename and delete the categories you file entries under.
+            </span>
+          </span>
+          <Chevron dir="right" size={16} />
+        </button>
+      </div>
 
       <div className="sect">Your data</div>
       <div className="setcard">
@@ -1222,6 +1236,7 @@ export default function App() {
   const [editing, setEditing] = useState(null);
   const [drill, setDrill] = useState(null);
   const [picker, setPicker] = useState(null);
+  const [showCats, setShowCats] = useState(false);
 
   const [period, setPeriod] = useState("m");
   const [off, setOff] = useState(0);
@@ -1230,7 +1245,7 @@ export default function App() {
 
   // Any change to what's on screen returns you to the top of it — the
   // content below a stale scroll offset is never the content you left.
-  useEffect(() => { window.scrollTo(0, 0); }, [tab, drill, period, off, kind, catFilter]);
+  useEffect(() => { window.scrollTo(0, 0); }, [tab, drill, period, off, kind, catFilter, showCats]);
 
   useEffect(() => {
     Promise.all([db.getAll(), db.getAllCats()])
@@ -1342,7 +1357,9 @@ export default function App() {
           </div>
         )}
 
-        {drill ? (
+        {showCats ? (
+          <CategoriesScreen txns={txns} onBack={() => setShowCats(false)} />
+        ) : drill ? (
           <CategoryDetail f={f} txns={txns} id={drill} onBack={() => setDrill(null)}
             onTap={setEditing} onPick={setPicker} />
         ) : (
@@ -1351,16 +1368,19 @@ export default function App() {
               <Summary f={f} cur={cur} prevTotal={prevTotal} onPick={setPicker} onDrill={setDrill} />
             )}
             {tab === "entries" && <Entries f={f} txns={txns} cur={cur} onPick={setPicker} onTap={setEditing} />}
-            {tab === "settings" && <SettingsScreen txns={txns} onReplace={replaceAll} onAdd={addMany} />}
+            {tab === "settings" && (
+              <SettingsScreen txns={txns} onReplace={replaceAll} onAdd={addMany}
+                onCategories={() => setShowCats(true)} />
+            )}
           </>
         )}
 
         <nav className="navwrap">
           <div className="navpill">
             {TABS.map(([k, name, Icon]) => (
-              <button key={k} className={`navbtn ${!drill && tab === k ? "on" : ""}`}
-                onClick={() => { setDrill(null); setTab(k); }}
-                aria-current={!drill && tab === k ? "page" : undefined}>
+              <button key={k} className={`navbtn ${!drill && !showCats && tab === k ? "on" : ""}`}
+                onClick={() => { setDrill(null); setShowCats(false); setTab(k); }}
+                aria-current={!drill && !showCats && tab === k ? "page" : undefined}>
                 <Icon />
                 {name}
               </button>
