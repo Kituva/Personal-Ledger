@@ -351,9 +351,24 @@ const SAMPLE = {
 };
 const WEIGHTS = { dining:26, groceries:12, transport:16, subs:3, utilities:3, home:2, ent:5, health:4, travel:2, personal:7, gifts:3, invest:2, debt:2, misc:13 };
 
-function sample() {
+/**
+ * Three months of plausible spending. Keyed to the default ids, so it filters
+ * its pool to whatever still exists — a category you deleted must not come
+ * back as an entry pointing at nothing.
+ */
+function sample(cats) {
+  const has = new Set(cats.map((c) => c.id));
   const pool = [];
-  Object.entries(WEIGHTS).forEach(([k, w]) => { for (let i = 0; i < w; i++) pool.push(k); });
+  Object.entries(WEIGHTS).forEach(([k, w]) => {
+    if (!has.has(k)) return;
+    for (let i = 0; i < w; i++) pool.push(k);
+  });
+  if (!pool.length) return [];
+
+  /* Salary if it is still there, otherwise whatever the income side starts
+     with — the demo should show money coming in either way. */
+  const incomeCat = has.has("salary") ? "salary" : bySide(cats, "income")[0]?.id;
+
   const out = []; const now = new Date();
   for (let back = 104; back >= 0; back--) {
     const d = new Date(now); d.setDate(d.getDate() - back);
@@ -365,9 +380,9 @@ function sample() {
       const [name, lo, hi] = SAMPLE[cat][Math.floor(Math.random() * SAMPLE[cat].length)];
       out.push({ id: uid(), amount: Math.round((lo + Math.random() * (hi - lo)) / 10) * 10, type: "expense", cat, note: name, date: iso(d) });
     }
-    if (d.getDate() === 3) out.push({ id: uid(), amount: 28000, type: "expense", cat: "home", note: "Rent", date: iso(d) });
-    if (d.getDate() === 5) out.push({ id: uid(), amount: 10000, type: "expense", cat: "invest", note: "SIP", date: iso(d) });
-    if (d.getDate() === 1) out.push({ id: uid(), amount: 132000, type: "income", cat: "misc", note: "Salary", date: iso(d) });
+    if (d.getDate() === 3 && has.has("home")) out.push({ id: uid(), amount: 28000, type: "expense", cat: "home", note: "Rent", date: iso(d) });
+    if (d.getDate() === 5 && has.has("invest")) out.push({ id: uid(), amount: 10000, type: "expense", cat: "invest", note: "SIP", date: iso(d) });
+    if (d.getDate() === 1 && incomeCat) out.push({ id: uid(), amount: 132000, type: "income", cat: incomeCat, note: "Salary", date: iso(d) });
   }
   return out;
 }
@@ -579,7 +594,10 @@ function Filters({ f, onPick, showCat = true }) {
   const cat = f.catFilter ? byId[f.catFilter] : null;
   return (
     <div className="pills">
-      <button className="pill" onClick={() => f.setKind(f.kind === "expense" ? "income" : "expense")}>
+      <button className="pill" onClick={() => {
+        f.setKind(f.kind === "expense" ? "income" : "expense");
+        f.setCatFilter(null);
+      }}>
         {f.kind === "expense" ? "Expenses" : "Income"}
       </button>
       <button className="pill" onClick={() => onPick("period")}>
@@ -1008,7 +1026,7 @@ function SettingsScreen({ txns, onReplace, onAdd, onCategories }) {
           <Chevron dir="right" size={16} />
         </button>
 
-        <button className="row" onClick={() => { onAdd(sample()); setMsg("Sample data loaded."); }}>
+        <button className="row" onClick={() => { onAdd(sample(cats)); setMsg("Sample data loaded."); }}>
           <span>
             Load sample data
             <span className="rowsub" style={{ display: "block" }}>
@@ -1419,7 +1437,7 @@ export default function App() {
         {picker === "cat" && (
           <PickerSheet title="Category" value={catFilter} onClose={() => setPicker(null)}
             onPick={setCatFilter}
-            options={[{ id: null, name: "All categories" }, ...cats]} />
+            options={[{ id: null, name: "All categories" }, ...bySide(cats, kind)]} />
         )}
 
         {editing && (
