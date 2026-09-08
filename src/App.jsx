@@ -1,37 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import * as db from "./db.js";
-
-/* ============================================================
-   Categories
-
-   The ids and names are load-bearing: db.js stores `cat: <id>` on every
-   transaction and the CSV importer matches on the name. Only the colour
-   and the emoji are new.
-   ============================================================ */
-export const CATS = [
-  { id: "dining", name: "Dining Out", e: "🍽️", c: "#22a7ff" },
-  { id: "groceries", name: "Groceries", e: "🛒", c: "#f4555f" },
-  { id: "transport", name: "Transportation", e: "🚗", c: "#7c5cff" },
-  { id: "subs", name: "Subscriptions", e: "🔁", c: "#a855f7" },
-  { id: "utilities", name: "Utilities", e: "💡", c: "#f7c948" },
-  { id: "home", name: "Home", e: "🏠", c: "#ff5fa2" },
-  { id: "ent", name: "Entertainment", e: "🎬", c: "#f08a4b" },
-  { id: "health", name: "Health/medical", e: "💊", c: "#2ecc9b" },
-  { id: "travel", name: "Travel", e: "✈️", c: "#38bdf8" },
-  { id: "personal", name: "Personal", e: "🧴", c: "#c084fc" },
-  { id: "gifts", name: "Gifts/Donations", e: "🎁", c: "#fb7185" },
-  { id: "invest", name: "Investments", e: "📈", c: "#4ade80" },
-  { id: "debt", name: "Debt", e: "💳", c: "#ef4444" },
-  { id: "misc", name: "Miscellaneous", e: "📦", c: "#94a3b8" },
-];
-const CAT = Object.fromEntries(CATS.map((c) => [c.id, c]));
-const BY_NAME = Object.fromEntries(CATS.map((c) => [c.name.toLowerCase(), c.id]));
-
-/** A category's colour at low alpha, for the tile behind its emoji. */
-const tint = (hex, a = 0.16) => {
-  const n = parseInt(String(hex).slice(1), 16);
-  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
-};
+import { CatsContext, useCats, bySide, tint } from "./categories.js";
 
 /* --neg and --pos again, in hex. The calendar shades its cells at a dozen
    alphas per screen, and `tint` needs a number to do that — a CSS variable
@@ -393,7 +362,7 @@ function readDate(s) {
  * A negative amount is treated as income. Rows without a usable date or
  * amount are counted as skipped rather than silently dropped.
  */
-function parseCsv(text) {
+function parseCsv(text, cats) {
   const lines = text.split(/\r?\n/).filter((l) => l.trim());
   if (!lines.length) return { rows: [], skipped: 0 };
 
@@ -413,7 +382,7 @@ function parseCsv(text) {
       id: uid(),
       amount: Math.abs(raw),
       type: raw < 0 ? "income" : "expense",
-      cat: BY_NAME[catName] || "misc",
+      cat: cats.find((c) => c.name.toLowerCase() === catName)?.id || "misc",
       note: c[3] || "",
       date,
     });
@@ -421,14 +390,14 @@ function parseCsv(text) {
   return { rows, skipped };
 }
 
-function toCsv(txns) {
+function toCsv(txns, byId) {
   const rows = [["Date", "Amount", "Category", "Description", "Month", "Year"]];
   [...txns].sort((a, b) => a.date.localeCompare(b.date)).forEach((t) => {
     const d = parseISO(t.date);
     rows.push([
       `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()}`,
       (t.type === "income" ? -t.amount : t.amount).toFixed(2),
-      CAT[t.cat]?.name || "Miscellaneous",
+      byId[t.cat]?.name || "Miscellaneous",
       t.note || "",
       MONTHS[d.getMonth()],
       d.getFullYear(),
@@ -682,7 +651,8 @@ function SpendGrid({ f, pool, buckets, sel, onSel, colour, onOpenMonth }) {
    Filter pills
    ============================================================ */
 function Filters({ f, onPick, showCat = true }) {
-  const cat = f.catFilter ? CAT[f.catFilter] : null;
+  const { byId } = useCats();
+  const cat = f.catFilter ? byId[f.catFilter] : null;
   return (
     <div className="pills">
       <button className="pill" onClick={() => f.setKind(f.kind === "expense" ? "income" : "expense")}>
@@ -761,7 +731,8 @@ function Delta({ pct, from, goodDown = true }) {
  * row rather than the width of a stroke.
  */
 function CatRow({ id, v, n, pct, share, grown, onTap }) {
-  const c = CAT[id];
+  const { byId } = useCats();
+  const c = byId[id];
   return (
     <button className="catrow" onClick={() => onTap?.(id)}>
       <span className="tile" style={{ color: c?.c, background: tint(c?.c) }}>{c?.e}</span>
@@ -783,7 +754,8 @@ function CatRow({ id, v, n, pct, share, grown, onTap }) {
 }
 
 function TxnRow({ t, onTap, hideCat }) {
-  const c = CAT[t.cat];
+  const { byId } = useCats();
+  const c = byId[t.cat];
   return (
     <button className="txn" onClick={() => onTap?.(t)}>
       <span className="tile sm" style={{ color: c?.c, background: tint(c?.c) }}>{c?.e}</span>
@@ -961,7 +933,8 @@ function Entries({ f, txns, cur, onPick, onTap }) {
    Category detail
    ============================================================ */
 function CategoryDetail({ f, txns, id, onBack, onTap, onPick }) {
-  const c = CAT[id];
+  const { byId } = useCats();
+  const c = byId[id];
 
   const cur = useMemo(() => txns.filter((t) => {
     const d = parseISO(t.date);
@@ -1020,12 +993,13 @@ function CategoryDetail({ f, txns, id, onBack, onTap, onPick }) {
    Settings
    ============================================================ */
 function SettingsScreen({ txns, onReplace, onAdd }) {
+  const { cats, byId } = useCats();
   const [confirm, setConfirm] = useState(false);
   const [msg, setMsg] = useState(null);
   const fileRef = useRef(null);
 
   const download = () => {
-    const url = URL.createObjectURL(new Blob([toCsv(txns)], { type: "text/csv;charset=utf-8;" }));
+    const url = URL.createObjectURL(new Blob([toCsv(txns, byId)], { type: "text/csv;charset=utf-8;" }));
     const a = document.createElement("a");
     a.href = url;
     a.download = `Expenses-${iso(new Date())}.csv`;
@@ -1037,7 +1011,7 @@ function SettingsScreen({ txns, onReplace, onAdd }) {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const { rows, skipped } = parseCsv(await file.text());
+      const { rows, skipped } = parseCsv(await file.text(), cats);
       if (!rows.length) { setMsg("No usable rows found. Expected Date, Amount, Category, Description."); return; }
       await onAdd(rows);
       setMsg(`Imported ${rows.length} entries${skipped ? `, skipped ${skipped}` : ""}.`);
@@ -1185,6 +1159,7 @@ function Calendar({ value, onPick }) {
    Entry sheet — add and edit
    ============================================================ */
 function EntrySheet({ txn, onSave, onDelete, onClose }) {
+  const { expense, income } = useCats();
   const isEdit = Boolean(txn.id);
   const [amt, setAmt] = useState(isEdit ? String(txn.amount) : "");
   const [type, setType] = useState(txn.type || "expense");
@@ -1219,7 +1194,7 @@ function EntrySheet({ txn, onSave, onDelete, onClose }) {
   };
 
   const dates = [0, 1].map((o) => { const d = new Date(); d.setDate(d.getDate() - o); return iso(d); });
-  const sel = cat ? CAT[cat] : null;
+  const sel = cat ? [...expense, ...income].find((c) => c.id === cat) : null;
 
   return (
     <div className="sheet">
@@ -1296,7 +1271,7 @@ function EntrySheet({ txn, onSave, onDelete, onClose }) {
 
       {grid && (
         <div className="catgrid">
-          {CATS.map((c) => (
+          {[...expense, ...income].map((c) => (
             <button key={c.id} className={`gopt ${c.id === cat ? "on" : ""}`}
               onClick={() => { setCat(c.id); setGrid(false); }}>
               <span className="tile sm" style={{ color: c.c, background: tint(c.c) }}>{c.e}</span>
@@ -1327,6 +1302,7 @@ function EntrySheet({ txn, onSave, onDelete, onClose }) {
    ============================================================ */
 export default function App() {
   const [txns, setTxns] = useState([]);
+  const [cats, setCats] = useState([]);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState(null);
   const [tab, setTab] = useState("summary");
@@ -1344,10 +1320,11 @@ export default function App() {
   useEffect(() => { window.scrollTo(0, 0); }, [tab, drill, period, off, kind, catFilter]);
 
   useEffect(() => {
-    db.getAll()
-      .then((rows) => {
+    Promise.all([db.getAll(), db.getAllCats()])
+      .then(([rows, catRows]) => {
         rows.sort((a, b) => b.date.localeCompare(a.date));
         setTxns(rows);
+        setCats(catRows);
       })
       .catch((e) => setError(e.message || "Couldn't open the database."))
       .finally(() => setReady(true));
@@ -1386,6 +1363,29 @@ export default function App() {
     return t.type === kind && (!catFilter || t.cat === catFilter) && d >= range.prevStart && d <= range.prevEnd;
   }).reduce((s, t) => s + t.amount, 0), [txns, kind, catFilter, range]);
 
+  const addCat = async (cat) => {
+    setCats((p) => [...p, cat]);
+    try { await db.putCat(cat); } catch { setError("Couldn't save that category."); }
+  };
+
+  const updateCat = async (cat) => {
+    setCats((p) => p.map((c) => (c.id === cat.id ? cat : c)));
+    try { await db.putCat(cat); } catch { setError("Couldn't save that category."); }
+  };
+
+  const deleteCat = async (id) => {
+    setCats((p) => p.filter((c) => c.id !== id));
+    try { await db.removeCat(id); } catch { setError("Couldn't delete that category."); }
+  };
+
+  const catsValue = useMemo(() => ({
+    cats,
+    byId: Object.fromEntries(cats.map((c) => [c.id, c])),
+    income: bySide(cats, "income"),
+    expense: bySide(cats, "expense"),
+    addCat, updateCat, deleteCat,
+  }), [cats]);
+
   const save = async (t) => {
     const rec = t.id ? t : { ...t, id: uid() };
     setTxns((p) => {
@@ -1420,56 +1420,58 @@ export default function App() {
   const TABS = [["summary", "Summary", PieIcon], ["entries", "Entries", ListIcon], ["settings", "Settings", GearIcon]];
 
   return (
-    <div className="lg">
-      {error && (
-        <div style={{ background: "var(--neg)", color: "#10141A", padding: "11px 16px", fontSize: 13.5, fontWeight: 500 }}
-          onClick={() => setError(null)} role="alert">
-          {error} — tap to dismiss
-        </div>
-      )}
+    <CatsContext.Provider value={catsValue}>
+      <div className="lg">
+        {error && (
+          <div style={{ background: "var(--neg)", color: "#10141A", padding: "11px 16px", fontSize: 13.5, fontWeight: 500 }}
+            onClick={() => setError(null)} role="alert">
+            {error} — tap to dismiss
+          </div>
+        )}
 
-      {drill ? (
-        <CategoryDetail f={f} txns={txns} id={drill} onBack={() => setDrill(null)}
-          onTap={setEditing} onPick={setPicker} />
-      ) : (
-        <>
-          {tab === "summary" && (
-            <Summary f={f} cur={cur} prevTotal={prevTotal} onPick={setPicker} onDrill={setDrill} />
-          )}
-          {tab === "entries" && <Entries f={f} txns={txns} cur={cur} onPick={setPicker} onTap={setEditing} />}
-          {tab === "settings" && <SettingsScreen txns={txns} onReplace={replaceAll} onAdd={addMany} />}
-        </>
-      )}
+        {drill ? (
+          <CategoryDetail f={f} txns={txns} id={drill} onBack={() => setDrill(null)}
+            onTap={setEditing} onPick={setPicker} />
+        ) : (
+          <>
+            {tab === "summary" && (
+              <Summary f={f} cur={cur} prevTotal={prevTotal} onPick={setPicker} onDrill={setDrill} />
+            )}
+            {tab === "entries" && <Entries f={f} txns={txns} cur={cur} onPick={setPicker} onTap={setEditing} />}
+            {tab === "settings" && <SettingsScreen txns={txns} onReplace={replaceAll} onAdd={addMany} />}
+          </>
+        )}
 
-      <nav className="navwrap">
-        <div className="navpill">
-          {TABS.map(([k, name, Icon]) => (
-            <button key={k} className={`navbtn ${!drill && tab === k ? "on" : ""}`}
-              onClick={() => { setDrill(null); setTab(k); }}
-              aria-current={!drill && tab === k ? "page" : undefined}>
-              <Icon />
-              {name}
-            </button>
-          ))}
-        </div>
-        <button className="fab" onClick={() => setEditing({})} aria-label="Add transaction"><Plus /></button>
-      </nav>
+        <nav className="navwrap">
+          <div className="navpill">
+            {TABS.map(([k, name, Icon]) => (
+              <button key={k} className={`navbtn ${!drill && tab === k ? "on" : ""}`}
+                onClick={() => { setDrill(null); setTab(k); }}
+                aria-current={!drill && tab === k ? "page" : undefined}>
+                <Icon />
+                {name}
+              </button>
+            ))}
+          </div>
+          <button className="fab" onClick={() => setEditing({})} aria-label="Add transaction"><Plus /></button>
+        </nav>
 
-      {picker === "period" && (
-        <PickerSheet title="Period" value={period} onClose={() => setPicker(null)}
-          onPick={changePeriod}
-          options={PERIODS.map(([id, name]) => ({ id, name }))} />
-      )}
-      {picker === "cat" && (
-        <PickerSheet title="Category" value={catFilter} onClose={() => setPicker(null)}
-          onPick={setCatFilter}
-          options={[{ id: null, name: "All categories" }, ...CATS]} />
-      )}
+        {picker === "period" && (
+          <PickerSheet title="Period" value={period} onClose={() => setPicker(null)}
+            onPick={changePeriod}
+            options={PERIODS.map(([id, name]) => ({ id, name }))} />
+        )}
+        {picker === "cat" && (
+          <PickerSheet title="Category" value={catFilter} onClose={() => setPicker(null)}
+            onPick={setCatFilter}
+            options={[{ id: null, name: "All categories" }, ...cats]} />
+        )}
 
-      {editing && (
-        <EntrySheet txn={editing} onSave={save}
-          onDelete={remove} onClose={() => setEditing(null)} />
-      )}
-    </div>
+        {editing && (
+          <EntrySheet txn={editing} onSave={save}
+            onDelete={remove} onClose={() => setEditing(null)} />
+        )}
+      </div>
+    </CatsContext.Provider>
   );
 }
