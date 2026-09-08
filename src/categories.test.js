@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   DEFAULT_CATS, PALETTE, makeCategory, nextColour, bySide,
-  nameAvailable, canDelete, canChangeSide, resolveImportCategory,
+  nameAvailable, canDelete, canChangeSide, resolveImportCategory, lastGrapheme,
 } from "./categories.js";
 
 const expenseSide = () => DEFAULT_CATS.filter((c) => c.side === "expense");
@@ -201,5 +201,37 @@ describe("resolveImportCategory", () => {
     const r = resolveImportCategory("", "expense", work);
     expect(r.cat.id).toBe("dining");
     expect(r.created).toBe(null);
+  });
+});
+
+describe("lastGrapheme", () => {
+  it("keeps a plain emoji", () => {
+    expect(lastGrapheme("💼")).toBe("💼");
+  });
+
+  it("keeps a flag whole rather than one regional indicator", () => {
+    expect(lastGrapheme("🇺🇸")).toBe("🇺🇸");
+  });
+
+  it("keeps a skin-tone modifier attached to its base", () => {
+    expect(lastGrapheme("👍🏽")).toBe("👍🏽");
+  });
+
+  it("keeps a zero-width-joined family whole", () => {
+    expect(lastGrapheme("👨‍👩‍👧‍👦")).toBe("👨‍👩‍👧‍👦");
+  });
+
+  it("keeps a trailing variation selector attached, as two defaults carry", () => {
+    expect(lastGrapheme("🍽️")).toBe("🍽️");
+    expect(lastGrapheme("↩️")).toBe("↩️");
+  });
+
+  it("takes only the last when the keyboard has appended", () => {
+    expect(lastGrapheme("💼🏦")).toBe("🏦");
+  });
+
+  it("returns empty for a blank field", () => {
+    expect(lastGrapheme("")).toBe("");
+    expect(lastGrapheme("   ")).toBe("");
   });
 });

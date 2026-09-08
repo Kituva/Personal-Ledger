@@ -8,7 +8,7 @@
  */
 
 import React, { useState } from "react";
-import { useCats, makeCategory, nameAvailable, canChangeSide, tint } from "./categories.js";
+import { useCats, makeCategory, nameAvailable, canChangeSide, tint, lastGrapheme } from "./categories.js";
 import { Check, Close } from "./icons.jsx";
 
 /* Money and daily life, roughly in that order. Anything not here is typed
@@ -43,6 +43,7 @@ export default function CategorySheet({ cat, side, txns, onSave, onClose }) {
   const missing =
     !name.trim() ? "Give it a name"
     : !nameAvailable(name, type, cats, cat?.id) ? `You already have an ${type} category called that`
+    : !emoji ? "Pick an icon"
     : null;
   const valid = !missing;
 
@@ -97,7 +98,7 @@ export default function CategorySheet({ cat, side, txns, onSave, onClose }) {
 
       <div style={{ padding: "0 16px calc(20px + env(safe-area-inset-bottom))" }}>
         <input className="inp" placeholder="…or type any emoji" value={emoji}
-          onChange={(e) => setEmoji([...e.target.value].slice(-1)[0] || "")}
+          onChange={(e) => setEmoji(lastGrapheme(e.target.value))}
           onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
       </div>
     </div>

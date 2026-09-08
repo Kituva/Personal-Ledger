@@ -74,6 +74,27 @@ export function nextColour(cats) {
   return best;
 }
 
+/**
+ * The last user-perceived character of a string.
+ *
+ * A phone's emoji keyboard appends rather than replaces, so the field has to
+ * keep only the most recent emoji. Slicing by code point is not enough: a flag
+ * is two regional indicators, a skin tone is a base plus a modifier, a family
+ * is several people joined by zero-width joiners, and even 🍽️ carries a
+ * trailing variation selector — splitting any of those keeps a meaningless
+ * fragment. Intl.Segmenter groups them properly; where it is missing, keeping
+ * what was typed beats mangling it.
+ */
+export function lastGrapheme(s) {
+  const v = String(s ?? "").trim();
+  if (!v) return "";
+  if (typeof Intl !== "undefined" && typeof Intl.Segmenter === "function") {
+    const parts = [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(v)];
+    return parts.length ? parts[parts.length - 1].segment : "";
+  }
+  return v;
+}
+
 export const bySide = (cats, side) =>
   cats.filter((c) => c.side === side).sort((a, b) => a.pos - b.pos);
 
