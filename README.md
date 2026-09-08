@@ -7,6 +7,7 @@ no server, no network. Everything lives in IndexedDB on the device.
 npm install
 npm run dev        # http://localhost:5173/Personal-Ledger/
 npm run build      # -> dist/
+npm test           # the category rules and the CSV importer
 ```
 
 ## Deploy
@@ -39,8 +40,12 @@ persistent storage, and the safe-area handling around the notch.
 
 | | |
 |---|---|
-| `src/App.jsx` | Every screen — Summary, Entries, Settings, category detail, entry sheet. |
-| `src/db.js` | IndexedDB wrapper. One store, no dependencies. |
+| `src/App.jsx` | Most screens — Summary, Entries, Settings, category detail, entry sheet. |
+| `src/categories.js` | Categories as data: the defaults, and the rules about what may be renamed, deleted or re-sided. |
+| `src/CategoriesScreen.jsx` | The Categories screen, reached from Settings. |
+| `src/CategorySheet.jsx` | Add or edit one category. |
+| `src/icons.jsx` | The drawn icons, shared by every screen. |
+| `src/db.js` | IndexedDB wrapper. Two stores, no dependencies. |
 | `src/styles.css` | All styling. |
 | `vite.config.js` | Manifest and service worker via `vite-plugin-pwa`. |
 
@@ -111,13 +116,27 @@ format set to DMY.
 
 ## Categories
 
+A category belongs to one side or the other. Expenses ship as:
+
 Dining Out · Groceries · Transportation · Subscriptions · Utilities · Home ·
 Entertainment · Health/medical · Travel · Personal · Gifts/Donations ·
 Investments · Debt · Miscellaneous
 
-Fixed set, defined at the top of `App.jsx`. The picker orders them by how often
-you've used them, so after a couple of weeks your usual three or four sit at
-the front and most entries are one tap.
+and income as Salary · Interest · Refunds · Gifts · Other income.
+
+Those nineteen are a starting point, not the set. Settings → **Categories** is
+where you add your own, rename or re-icon any of them, and delete the ones you
+don't want; the ⋯ on each row holds all three. The entry sheet shows one side
+or the other depending on whether you tapped Spent or Received.
+
+Deleting is blocked while entries still point at a category, and says how many
+rather than orphaning them. A category's side is fixed for the same reason once
+it has entries — flipping it would turn money received into money spent without
+touching a single entry.
+
+Order is the order you see, never alphabetical. The original fourteen keep the
+positions they have always had and anything you add goes to the end of its
+section, so the grid you pick from every day doesn't rearrange itself under you.
 
 ## The two charts
 
@@ -160,5 +179,5 @@ sweep. A fortnight away can empty the tab; it can't empty the icon.
 ## If you outgrow local-only
 
 The seam is `src/db.js`. Every read and write goes through it, and `App.jsx`
-never touches `indexedDB` directly. Swapping the five exported functions for
-`fetch` calls against an API is the whole migration.
+never touches `indexedDB` directly. Swapping its exported functions for `fetch`
+calls against an API is the whole migration.
