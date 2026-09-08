@@ -234,4 +234,18 @@ describe("lastGrapheme", () => {
     expect(lastGrapheme("")).toBe("");
     expect(lastGrapheme("   ")).toBe("");
   });
+
+  it("stays bounded when Intl.Segmenter is unavailable", () => {
+    const real = Intl.Segmenter;
+    Intl.Segmenter = undefined;
+    try {
+      expect(lastGrapheme("💼🏦")).toBe("🏦");
+      expect(lastGrapheme("")).toBe("");
+      // The point of the fallback is that it cannot grow, even where it
+      // cannot keep a multi-code-point emoji whole.
+      expect([...lastGrapheme("💼🏦🍽️")].length).toBeLessThanOrEqual(2);
+    } finally {
+      Intl.Segmenter = real;
+    }
+  });
 });

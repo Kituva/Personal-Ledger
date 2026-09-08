@@ -82,8 +82,13 @@ export function nextColour(cats) {
  * is two regional indicators, a skin tone is a base plus a modifier, a family
  * is several people joined by zero-width joiners, and even 🍽️ carries a
  * trailing variation selector — splitting any of those keeps a meaningless
- * fragment. Intl.Segmenter groups them properly; where it is missing, keeping
- * what was typed beats mangling it.
+ * fragment. Intl.Segmenter groups them properly.
+ *
+ * Where it is missing (Safari below 16.4), fall back to the last code point.
+ * That mangles those same emoji, exactly as this field did before Segmenter
+ * was used — but it stays bounded, and bounded is the property that matters
+ * here: an unbounded fallback would let the keyboard grow the field forever
+ * and save the whole accumulated string as the icon.
  */
 export function lastGrapheme(s) {
   const v = String(s ?? "").trim();
@@ -92,7 +97,7 @@ export function lastGrapheme(s) {
     const parts = [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(v)];
     return parts.length ? parts[parts.length - 1].segment : "";
   }
-  return v;
+  return [...v].slice(-1)[0] || "";
 }
 
 export const bySide = (cats, side) =>
