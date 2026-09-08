@@ -11,9 +11,8 @@ import { useCats, canDelete, tint } from "./categories.js";
 import { Chevron, More, Plus } from "./icons.jsx";
 import CategorySheet from "./CategorySheet.jsx";
 
-function Section({ side, label, list, txns, onEdit, onAdd }) {
+function Section({ side, label, list, txns, open, setOpen, onEdit, onAdd }) {
   const { cats, deleteCat } = useCats();
-  const [open, setOpen] = useState(null);
 
   return (
     <>
@@ -47,7 +46,7 @@ function Section({ side, label, list, txns, onEdit, onAdd }) {
       })}
 
       <button className="addcat" onClick={() => onAdd(side)}>
-        <span className="plus"><Plus /></span>Add {label.toLowerCase()} category
+        <span className="plus"><Plus /></span>Add {side} category
       </button>
     </>
   );
@@ -56,6 +55,7 @@ function Section({ side, label, list, txns, onEdit, onAdd }) {
 export default function CategoriesScreen({ txns, onBack }) {
   const { income, expense, addCat, updateCat } = useCats();
   const [sheet, setSheet] = useState(null);
+  const [open, setOpen] = useState(null);
 
   const onEdit = (cat) => setSheet({ cat, side: cat.side });
   const onAdd = (side) => setSheet({ cat: null, side });
@@ -74,9 +74,9 @@ export default function CategoriesScreen({ txns, onBack }) {
       </div>
 
       <Section side="income" label="Income" list={income}
-        txns={txns} onEdit={onEdit} onAdd={onAdd} />
+        txns={txns} open={open} setOpen={setOpen} onEdit={onEdit} onAdd={onAdd} />
       <Section side="expense" label="Expenses" list={expense}
-        txns={txns} onEdit={onEdit} onAdd={onAdd} />
+        txns={txns} open={open} setOpen={setOpen} onEdit={onEdit} onAdd={onAdd} />
 
       <div style={{ padding: "18px 4px 20px", fontSize: 12.5, color: "var(--text3)", lineHeight: 1.65 }}>
         A category belongs to one side or the other. Deleting one is blocked
