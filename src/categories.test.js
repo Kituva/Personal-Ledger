@@ -33,9 +33,12 @@ describe("DEFAULT_CATS", () => {
     });
   });
 
-  it("allows the same name on both sides", () => {
-    const names = DEFAULT_CATS.filter((c) => c.name.includes("Gifts")).map((c) => c.side);
-    expect(names.sort()).toEqual(["expense", "income"]);
+  it("keeps the original fourteen expense names, exactly", () => {
+    expect(expenseSide().map((c) => c.name)).toEqual([
+      "Dining Out", "Groceries", "Transportation", "Subscriptions",
+      "Utilities", "Home", "Entertainment", "Health/medical", "Travel",
+      "Personal", "Gifts/Donations", "Investments", "Debt", "Miscellaneous",
+    ]);
   });
 });
 
