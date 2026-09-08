@@ -39,3 +39,6 @@ desktop.ini
 
 # superpowers brainstorming scratch
 .superpowers/
+
+# git worktrees for isolated feature work
+.worktrees/
