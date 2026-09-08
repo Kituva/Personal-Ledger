@@ -26,7 +26,7 @@ npx vercel --prod          # or: npx netlify deploy --prod --dir=dist
 ```
 
 Whatever you pick has to be HTTPS — the service worker won't register without
-it. No environment variables. No database. It's four files and some icons.
+it. No environment variables. No database. It's a handful of files and some icons.
 
 ## Install on a phone
 
@@ -45,7 +45,7 @@ persistent storage, and the safe-area handling around the notch.
 | `src/CategoriesScreen.jsx` | The Categories screen, reached from Settings. |
 | `src/CategorySheet.jsx` | Add or edit one category. |
 | `src/icons.jsx` | The drawn icons, shared by every screen. |
-| `src/db.js` | IndexedDB wrapper. Two stores, no dependencies. |
+| `src/db.js` | IndexedDB wrapper for transactions and categories, no dependencies. |
 | `src/styles.css` | All styling. |
 | `vite.config.js` | Manifest and service worker via `vite-plugin-pwa`. |
 
@@ -126,8 +126,9 @@ and income as Salary · Interest · Refunds · Gifts · Other income.
 
 Those nineteen are a starting point, not the set. Settings → **Categories** is
 where you add your own, rename or re-icon any of them, and delete the ones you
-don't want; the ⋯ on each row holds all three. The entry sheet shows one side
-or the other depending on whether you tapped Spent or Received.
+don't want. Adding has its own button at the end of each section; the ⋯ on
+each row holds the other two. The entry sheet shows one side or the other
+depending on whether you tapped Spent or Received.
 
 Deleting is blocked while entries still point at a category, and says how many
 rather than orphaning them. A category's side is fixed for the same reason once
