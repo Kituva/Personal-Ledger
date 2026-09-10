@@ -10,12 +10,14 @@
 import { DEFAULT_CATS } from "./categories.js";
 
 const DB_NAME = "ledger";
-/* v2 added the categories store. The upgrade only creates and seeds it —
-   transactions are not read, rewritten or migrated, so an existing install
-   comes through with every entry exactly as it was. */
-const DB_VERSION = 2;
+/* v2 added the categories store, v3 the meta store behind the Google Sheet
+   push. Each upgrade only creates what it needs — transactions are never read,
+   rewritten or migrated, so an existing install comes through with every entry
+   exactly as it was. */
+const DB_VERSION = 3;
 const STORE = "transactions";
 const CATS = "categories";
+const META = "meta";
 
 let dbPromise = null;
 
@@ -36,6 +38,9 @@ function open() {
         const store = db.createObjectStore(CATS, { keyPath: "id" });
         DEFAULT_CATS.forEach((c) => store.add(c));
       }
+      /* Where the sheet's address, code and last-push time live. Keys are
+         out of line because none of these values carries an id of its own. */
+      if (!db.objectStoreNames.contains(META)) db.createObjectStore(META);
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -57,7 +62,10 @@ function run(mode, fn, name = STORE) {
           reject(err);
           return;
         }
-        tx.oncomplete = () => resolve(result?.result ?? result);
+        /* Unwrap a request, pass anything else straight through. `??` would
+           not do: a get on a missing key leaves `result` undefined on the
+           request, and the fallback would hand back the request itself. */
+        tx.oncomplete = () => resolve(result instanceof IDBRequest ? result.result : result);
         tx.onerror = () => reject(tx.error);
         tx.onabort = () => reject(tx.error);
       })
@@ -85,6 +93,13 @@ export const removeCat = (id) => run("readwrite", (s) => s.delete(id), CATS);
 
 export const bulkPutCats = (list) =>
   run("readwrite", (s) => { list.forEach((c) => s.put(c)); }, CATS);
+
+/* The sheet connection. `clear` above empties transactions only, so Start
+   fresh keeps you connected — and the push's removal guard is what stands
+   between that and an emptied archive. */
+export const getMeta = (key) => run("readonly", (s) => s.get(key), META);
+
+export const setMeta = (key, value) => run("readwrite", (s) => s.put(value, key), META);
 
 /**
  * Ask the browser not to evict this data under storage pressure.

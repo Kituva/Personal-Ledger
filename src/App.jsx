@@ -6,6 +6,10 @@ import {
   Backspace, GridIcon, Reset, Check, Trash, Close,
 } from "./icons.jsx";
 import CategoriesScreen from "./CategoriesScreen.jsx";
+import SyncScreen from "./SyncScreen.jsx";
+import {
+  toSheetRows, diffTags, dueForPush, summarise, confirmText, readSheet, writeSheet,
+} from "./sync.js";
 
 /* --neg and --pos again, in hex. The calendar shades its cells at a dozen
    alphas per screen, and `tint` needs a number to do that — a CSS variable
@@ -935,7 +939,7 @@ function CategoryDetail({ f, txns, id, onBack, onTap, onPick }) {
 /* ============================================================
    Settings
    ============================================================ */
-function SettingsScreen({ txns, onReplace, onAdd, onCategories }) {
+function SettingsScreen({ txns, onReplace, onAdd, onCategories, onSheet }) {
   const { cats, byId, addCat: onAddCat } = useCats();
   const [confirm, setConfirm] = useState(false);
   const [msg, setMsg] = useState(null);
@@ -1001,6 +1005,16 @@ function SettingsScreen({ txns, onReplace, onAdd, onCategories }) {
           </span>
           <Chevron dir="right" size={16} />
         </button>
+
+        <button className="row" onClick={onSheet}>
+          <span>
+            Google Sheet
+            <span className="rowsub" style={{ display: "block" }}>
+              Push every entry to a sheet, so the archive keeps itself up to date.
+            </span>
+          </span>
+          <Chevron dir="right" size={16} />
+        </button>
       </div>
 
       <div className="sect">Your data</div>
@@ -1051,9 +1065,10 @@ function SettingsScreen({ txns, onReplace, onAdd, onCategories }) {
       </div>
 
       <div style={{ padding: "10px 4px 20px", fontSize: 12.5, color: "var(--text3)", lineHeight: 1.65 }}>
-        Everything lives on this device and never leaves it. Nothing is synced,
-        so exporting now and then is your only backup — and deleting the app
-        takes the data with it.
+        Everything lives on this device. Nothing leaves it unless you connect a
+        Google Sheet, and then only your entries, and only outward. Deleting the
+        app still takes the data with it — so keep the sheet current, or export
+        now and then.
       </div>
     </div>
   );
@@ -1278,6 +1293,12 @@ export default function App() {
   const [drill, setDrill] = useState(null);
   const [picker, setPicker] = useState(null);
   const [showCats, setShowCats] = useState(false);
+  const [showSync, setShowSync] = useState(false);
+
+  const [sheet, setSheet] = useState({ url: "", code: "", lastPushAt: null });
+  const [pushing, setPushing] = useState(false);
+  const [pushMsg, setPushMsg] = useState(null);
+  const [pendingRemovals, setPendingRemovals] = useState(0);
 
   const [period, setPeriod] = useState("m");
   const [off, setOff] = useState(0);
@@ -1286,14 +1307,18 @@ export default function App() {
 
   // Any change to what's on screen returns you to the top of it — the
   // content below a stale scroll offset is never the content you left.
-  useEffect(() => { window.scrollTo(0, 0); }, [tab, drill, period, off, kind, catFilter, showCats]);
+  useEffect(() => { window.scrollTo(0, 0); }, [tab, drill, period, off, kind, catFilter, showCats, showSync]);
 
   useEffect(() => {
-    Promise.all([db.getAll(), db.getAllCats()])
-      .then(([rows, catRows]) => {
+    Promise.all([
+      db.getAll(), db.getAllCats(),
+      db.getMeta("sheetUrl"), db.getMeta("sheetCode"), db.getMeta("lastPushAt"),
+    ])
+      .then(([rows, catRows, url, code, lastPushAt]) => {
         rows.sort((a, b) => b.date.localeCompare(a.date));
         setTxns(rows);
         setCats(catRows);
+        setSheet({ url: url || "", code: code || "", lastPushAt: lastPushAt || null });
       })
       .catch((e) => setError(e.message || "Couldn't open the database."))
       .finally(() => setReady(true));
@@ -1382,6 +1407,92 @@ export default function App() {
     try { await db.bulkPut(rows); } catch { setError("Import didn't fully save."); }
   };
 
+  /* ============================================================
+     The Google Sheet push
+     ============================================================ */
+
+  const saveSheet = async (patch) => {
+    setSheet((s) => ({ ...s, ...patch }));
+    try {
+      if ("url" in patch) await db.setMeta("sheetUrl", patch.url);
+      if ("code" in patch) await db.setMeta("sheetCode", patch.code);
+    } catch { setError("Couldn't save the sheet settings."); }
+  };
+
+  /**
+   * Read the tag column, work out what moved, rewrite the whole range.
+   *
+   * `confirmed` is the second pass after a removal warning. The sheet is read
+   * again rather than trusting the first look, so confirming an hour later
+   * cannot write a diff that has gone stale in the meantime.
+   */
+  /* The guard is a ref, not the `pushing` flag: two calls landing in the same
+     tick would both read a state value that has not re-rendered yet, and the
+     sheet would be written twice. */
+  const pushingRef = useRef(false);
+
+  const runPush = async (confirmed) => {
+    if (pushingRef.current || !sheet.url || !sheet.code) return;
+    pushingRef.current = true;
+    setPushing(true);
+    setPushMsg(null);
+    setPendingRemovals(0);
+
+    try {
+      const rows = toSheetRows(txns, catsValue.byId);
+      const read = await readSheet(sheet.url, sheet.code);
+      if (!read.ok) { setPushMsg({ kind: "error", text: read.message }); return; }
+
+      const diff = diffTags(rows.map((r) => r[6]), read.data.tags);
+      if (diff.removed.length && !confirmed) { setPendingRemovals(diff.removed.length); return; }
+
+      const wrote = await writeSheet(sheet.url, sheet.code, rows);
+      if (!wrote.ok) { setPushMsg({ kind: "error", text: wrote.message }); return; }
+
+      const at = Date.now();
+      setSheet((s) => ({ ...s, lastPushAt: at }));
+      db.setMeta("lastPushAt", at).catch(() => {});
+      setPushMsg({ kind: "ok", text: summarise(diff) });
+    } finally {
+      pushingRef.current = false;
+      setPushing(false);
+    }
+  };
+
+  /* A phone backgrounds a home-screen app rather than closing it, so booting
+     alone would rarely come round — becoming visible again is the event that
+     actually fires. The ref keeps that handler pointing at today's entries
+     however long the app has been away. */
+  const pushRef = useRef(runPush);
+  pushRef.current = runPush;
+  const sheetRef = useRef(sheet);
+  sheetRef.current = sheet;
+
+  /* Both reads go through refs so this runs on opening the app and on coming
+     back to it, and at no other time. Depending on the connection directly
+     would fire a push the moment you finished pasting the address — mid-setup,
+     before you had asked for one. */
+  useEffect(() => {
+    if (!ready) return;
+    const maybe = () => {
+      const { url, code, lastPushAt } = sheetRef.current;
+      if (!url || !code) return;
+      if (document.visibilityState !== "visible" || !navigator.onLine) return;
+      if (!dueForPush(lastPushAt, Date.now())) return;
+      pushRef.current(false);
+    };
+    maybe();
+    document.addEventListener("visibilitychange", maybe);
+    return () => document.removeEventListener("visibilitychange", maybe);
+  }, [ready]);
+
+  // A push that worked is worth a glance, not a dismissal. Errors stay put.
+  useEffect(() => {
+    if (pushMsg?.kind !== "ok") return;
+    const t = setTimeout(() => setPushMsg(null), 6000);
+    return () => clearTimeout(t);
+  }, [pushMsg]);
+
   if (!ready) {
     return <div className="lg"><div className="scroll"><div className="empty">Loading…</div></div></div>;
   }
@@ -1398,7 +1509,25 @@ export default function App() {
           </div>
         )}
 
-        {showCats ? (
+        {pendingRemovals > 0 ? (
+          <div className="pushbar" role="alert">
+            <span>{confirmText(pendingRemovals)}</span>
+            <span className="pushacts">
+              <button className="go" onClick={() => runPush(true)}>Push</button>
+              <button onClick={() => setPendingRemovals(0)}>Not now</button>
+            </span>
+          </div>
+        ) : pushMsg ? (
+          <div className={`pushbar ${pushMsg.kind}`} onClick={() => setPushMsg(null)} role="status">
+            {pushMsg.text}
+          </div>
+        ) : null}
+
+        {showSync ? (
+          <SyncScreen url={sheet.url} code={sheet.code} lastPushAt={sheet.lastPushAt}
+            pushing={pushing} onSave={saveSheet} onPush={runPush}
+            onBack={() => setShowSync(false)} />
+        ) : showCats ? (
           <CategoriesScreen txns={txns} onBack={() => setShowCats(false)} />
         ) : drill ? (
           <CategoryDetail f={f} txns={txns} id={drill} onBack={() => setDrill(null)}
@@ -1411,7 +1540,7 @@ export default function App() {
             {tab === "entries" && <Entries f={f} txns={txns} cur={cur} onPick={setPicker} onTap={setEditing} />}
             {tab === "settings" && (
               <SettingsScreen txns={txns} onReplace={replaceAll} onAdd={addMany}
-                onCategories={() => setShowCats(true)} />
+                onCategories={() => setShowCats(true)} onSheet={() => setShowSync(true)} />
             )}
           </>
         )}

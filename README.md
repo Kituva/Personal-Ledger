@@ -1,13 +1,14 @@
 # Ledger
 
-A manual expense tracker that installs to the iPhone home screen. No account,
-no server, no network. Everything lives in IndexedDB on the device.
+A manual expense tracker that installs to the iPhone home screen. No account and
+no server. Everything lives in IndexedDB on the device, and the only thing that
+ever leaves it is a push to a Google Sheet you connect yourself.
 
 ```bash
 npm install
 npm run dev        # http://localhost:5173/Personal-Ledger/
 npm run build      # -> dist/
-npm test           # the category rules and the CSV importer
+npm test           # the category rules, the CSV importer and the sheet push
 ```
 
 ## Deploy
@@ -45,7 +46,10 @@ persistent storage, and the safe-area handling around the notch.
 | `src/CategoriesScreen.jsx` | The Categories screen, reached from Settings. |
 | `src/CategorySheet.jsx` | Add or edit one category. |
 | `src/icons.jsx` | The drawn icons, shared by every screen. |
-| `src/db.js` | IndexedDB wrapper for transactions and categories, no dependencies. |
+| `src/sync.js` | The Google Sheet push: what to write, what changed, when it's due. |
+| `src/SyncScreen.jsx` | Connecting a sheet, reached from Settings. |
+| `docs/apps-script/Code.gs` | The script you paste into the sheet. |
+| `src/db.js` | IndexedDB wrapper for transactions, categories and the sheet connection, no dependencies. |
 | `src/styles.css` | All styling. |
 | `vite.config.js` | Manifest and service worker via `vite-plugin-pwa`. |
 
@@ -93,9 +97,54 @@ blank; three of those six had no category either and sit in Miscellaneous.
 ## Keeping the spreadsheet up to date
 
 The app is the record now and the spreadsheet is the archive, so the traffic
-runs the other way. Settings → **Export CSV** writes `Expenses-YYYY-MM-DD.csv`.
-That file is also the only backup there is, which is reason enough to do it
-regularly.
+runs the other way. There are two ways to keep the archive current, and the
+first one does it for you.
+
+### Pushing to a Google Sheet
+
+Settings → **Google Sheet** connects the app to a sheet and keeps that sheet
+matching. Setup is four steps and every one of them is a copy or a paste:
+
+1. Open a Google Sheet. Any sheet — the app writes to its own tab called
+   `Ledger` and leaves everything else in the file alone.
+2. In the sheet, Extensions → Apps Script. Delete what's there and paste in the
+   script from **Copy** on the setup screen. It arrives with your code in it.
+3. Deploy → New deployment → Web app, **Execute as: Me**, **Who has access:
+   Anyone**. Anyone is what lets the phone reach it without a Google sign-in;
+   the code is what stops anyone else who comes across the address.
+4. Paste the web app URL back into the app, then **Test connection**.
+
+After that it pushes on its own every ten days — the first time you open the app
+once ten days have passed, because a home-screen app cannot wake itself while
+the phone is in your pocket. **Push now** covers the times you don't want to
+wait.
+
+Three things worth knowing:
+
+**It's a mirror, not an append.** Entries you correct are corrected in the
+sheet and entries you delete go away, because a push rewrites the whole tab.
+
+**Removals are always confirmed.** Anything a push would take out is counted
+and shown to you first, so Start fresh followed by a push cannot quietly empty
+the archive. Google Sheets keeps its own version history as a second net.
+
+**Nothing is ever read back.** Edit a row in the sheet and the next push
+overwrites your edit. The app is the record.
+
+Column G carries the entry's id and is hidden on setup. It is what lets the app
+tell a corrected entry from a deleted one — without it, fixing an amount would
+read as a removal plus an addition. Rows typed into the sheet by hand have no
+id, so a push counts them as removals and asks before taking them out.
+
+Columns A–D are the CSV format's first four, in order, so File → Download →
+Comma-separated values on the `Ledger` tab gives you a file **Import CSV** can
+read straight back. Start fresh first: import adds rather than replaces.
+
+### Pasting a CSV by hand
+
+Settings → **Export CSV** writes `Expenses-YYYY-MM-DD.csv`. This is still the
+route into `Expenses001.xlsx`, and still worth doing now and then for a copy
+that lives somewhere you control.
 
 Three things to watch when pasting an export back into `Expenses001.xlsx`:
 
@@ -162,9 +211,10 @@ Entries can never disagree.
 It's on the device and nowhere else. That means no account to create, nothing
 of yours on anyone's server, and it works on a plane.
 
-It also means: **deleting the app deletes the data.** There is no sync and no
-backup. Export a CSV every month or so and keep it somewhere real — that
-habit is the entire disaster recovery plan.
+It also means: **deleting the app deletes the data.** Connecting a Google Sheet
+turns the push into a real backup, ten days stale at worst, and one you can
+import straight back. Without one, exporting a CSV every month or so and keeping
+it somewhere real is the entire disaster recovery plan.
 
 `navigator.storage.persist()` is requested at startup, which on an installed
 iOS PWA marks the data as persistent and protects it from routine eviction. It

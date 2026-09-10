@@ -1290,3 +1290,100 @@ input:focus-visible {
   background: var(--sel-wash);
   border-color: var(--sel);
 }
+
+/* ============================================================
+   Google Sheet
+
+   Setup is a numbered list because it is done once, on a phone, with
+   the sheet open in another tab — the numbers are what you come back
+   to. The push bar sits with the error banner at the top of the app,
+   since an automatic push can land on any screen.
+   ============================================================ */
+.syncstep {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: 12px;
+  padding: 15px;
+  border-bottom: 1px solid var(--hair);
+}
+.syncnum {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  border-radius: var(--r-pill);
+  background: var(--surface2);
+  color: var(--text2);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.synctitle {
+  font-size: 15.5px;
+  font-weight: 500;
+}
+.syncbody {
+  min-width: 0;
+}
+.syncbtn {
+  padding: 7px 13px;
+  border-radius: var(--r-pill);
+  background: var(--surface2);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.syncbtn:active {
+  background: var(--surface3);
+}
+.synccode {
+  display: inline-block;
+  margin-top: 9px;
+  padding: 4px 9px;
+  border-radius: 8px;
+  background: var(--surface2);
+  color: var(--text2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+.syncmsg {
+  padding: 0 4px 16px;
+  margin-top: -6px;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.pushbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 16px;
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.45;
+  background: var(--surface2);
+  color: var(--text);
+}
+.pushbar.error {
+  background: var(--neg);
+  color: var(--bg);
+}
+.pushacts {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+}
+.pushacts button {
+  padding: 6px 13px;
+  border-radius: var(--r-pill);
+  background: var(--surface3);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.pushacts button.go {
+  background: var(--sel);
+  color: var(--bg);
+}

@@ -30,6 +30,29 @@ function seedV1(rows) {
   });
 }
 
+/** Writes a v2 database by hand — transactions and categories, no meta — to
+    stand in for an install that predates the sheet push. */
+function seedV2(rows, cats) {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open("ledger", 2);
+    req.onupgradeneeded = (e) => {
+      const database = e.target.result;
+      const store = database.createObjectStore("transactions", { keyPath: "id" });
+      store.createIndex("date", "date");
+      database.createObjectStore("categories", { keyPath: "id" });
+    };
+    req.onsuccess = () => {
+      const database = req.result;
+      const tx = database.transaction(["transactions", "categories"], "readwrite");
+      rows.forEach((r) => tx.objectStore("transactions").put(r));
+      cats.forEach((c) => tx.objectStore("categories").put(c));
+      tx.oncomplete = () => { database.close(); resolve(); };
+      tx.onerror = () => reject(tx.error);
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
 describe("categories store", () => {
   beforeEach(() => { globalThis.indexedDB = new IDBFactory(); });
 
@@ -104,5 +127,57 @@ describe("categories store", () => {
     DEFAULT_CATS.forEach((want) => {
       expect(cats.find((c) => c.id === want.id)).toEqual(want);
     });
+  });
+});
+
+describe("sheet connection", () => {
+  beforeEach(() => { globalThis.indexedDB = new IDBFactory(); });
+
+  it("has nothing to say before you connect a sheet", async () => {
+    const db = await freshDb();
+    expect(await db.getMeta("sheetUrl")).toBeUndefined();
+  });
+
+  it("round-trips the address, the code and the clock", async () => {
+    const db = await freshDb();
+    await db.setMeta("sheetUrl", "https://script.google.com/macros/s/abc/exec");
+    await db.setMeta("sheetCode", "Zq7");
+    await db.setMeta("lastPushAt", 1757500000000);
+
+    expect(await db.getMeta("sheetUrl")).toBe("https://script.google.com/macros/s/abc/exec");
+    expect(await db.getMeta("sheetCode")).toBe("Zq7");
+    expect(await db.getMeta("lastPushAt")).toBe(1757500000000);
+  });
+
+  it("overwrites rather than accumulating", async () => {
+    const db = await freshDb();
+    await db.setMeta("sheetUrl", "https://one/exec");
+    await db.setMeta("sheetUrl", "https://two/exec");
+    expect(await db.getMeta("sheetUrl")).toBe("https://two/exec");
+  });
+
+  it("upgrades a v2 install without touching entries or categories", async () => {
+    globalThis.indexedDB = new IDBFactory();
+    await seedV2(
+      [{ id: "t1", amount: 260, type: "expense", cat: "dining", note: "Swiggy", date: "2026-09-01" }],
+      [{ id: "dining", name: "Eating Out", e: "🍽️", c: "#f4555f", side: "expense", pos: 0 }],
+    );
+
+    const db = await import(/* @vite-ignore */ `./db.js?bust=${Math.random()}`);
+
+    expect(await db.getAll()).toHaveLength(1);
+    expect((await db.getAllCats()).find((c) => c.id === "dining").name).toBe("Eating Out");
+    expect(await db.getMeta("sheetUrl")).toBeUndefined();
+  });
+
+  it("stays connected when the user starts fresh", async () => {
+    const db = await freshDb();
+    await db.setMeta("sheetUrl", "https://script.google.com/macros/s/abc/exec");
+    await db.put({ id: "t1", amount: 10, type: "expense", cat: "dining", note: "x", date: "2026-09-01" });
+
+    await db.clear();
+
+    expect(await db.getAll()).toHaveLength(0);
+    expect(await db.getMeta("sheetUrl")).toBe("https://script.google.com/macros/s/abc/exec");
   });
 });
