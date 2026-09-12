@@ -473,8 +473,13 @@ const amtSize = (s) => (s.length > 7 ? "xs" : s.length > 5 ? "sm" : "");
  * `days` is what to draw and `totals` is what to draw in it. They are
  * separate because on a Daily window the grid shows a whole month while
  * the screen behind it is one day of that month.
+ *
+ * `dim` greys the days you didn't pick. That reads as "these are filtered
+ * out", so it belongs on a screen whose list narrows to the chosen day and
+ * nowhere else — a grid that only scrolls the page would be claiming to
+ * have hidden thirty days it left sitting right there.
  */
-function SpendCalendar({ days, totals, colour, sel, onSel }) {
+function SpendCalendar({ days, totals, colour, sel, onSel, dim = true }) {
   const today = iso(new Date());
   const peak = Math.max(...days.map((k) => totals[k] || 0), 1);
   const lead = (parseISO(days[0]).getDay() + 6) % 7;
@@ -493,7 +498,7 @@ function SpendCalendar({ days, totals, colour, sel, onSel }) {
           const on = sel === k;
           return (
             <button key={k} disabled={future} onClick={() => onSel(k)}
-              className={`scday${on ? " sel" : ""}${sel && !on ? " dim" : ""}`
+              className={`scday${on ? " sel" : ""}${dim && sel && !on ? " dim" : ""}`
                 + `${future ? " fut" : ""}${k === today && !on ? " now" : ""}`}
               style={on || !v ? undefined : { background: tint(colour, 0.05 + 0.26 * w) }}
               aria-label={`${relDay(k)}, ${money(v)} rupees`}>
@@ -558,8 +563,12 @@ function MiniMonths({ months, totals, colour, onOpen }) {
  * `pool` is every transaction the screen cares about, narrowed by kind and
  * category but not by date — the Daily grid reaches outside its own window
  * and needs the days either side of it.
+ *
+ * `sel` and `onSel` are ISO dates, the same currency the calendar itself
+ * uses. Entries keeps its selection as a bucket index because its bar chart
+ * needs one, but that is Entries' business and it converts at the call.
  */
-function SpendGrid({ f, pool, buckets, sel, onSel, colour, onOpenMonth }) {
+function SpendGrid({ f, pool, buckets, sel, onSel, colour, onOpenMonth, dim = true }) {
   const totals = useMemo(() => dayTotals(pool), [pool]);
   const { period, range } = f;
 
@@ -577,10 +586,8 @@ function SpendGrid({ f, pool, buckets, sel, onSel, colour, onOpenMonth }) {
   }
 
   if (period === "w" || period === "m") {
-    const days = buckets.map((b) => b.from);
-    return <SpendCalendar days={days} totals={totals} colour={colour}
-      sel={sel === null ? null : days[sel]}
-      onSel={(k) => onSel(days.indexOf(k) === sel ? null : days.indexOf(k))} />;
+    return <SpendCalendar days={buckets.map((b) => b.from)} totals={totals}
+      colour={colour} sel={sel} onSel={onSel} dim={dim} />;
   }
 
   const months = [];
@@ -729,7 +736,7 @@ function DayGroups({ list, onTap, hideCat, limit = 120, empty = "Nothing here ye
   return (
     <>
       {groups.map(([date, rows]) => (
-        <div key={date}>
+        <div key={date} data-day={date}>
           <div className="dayhead">
             <span>{relDay(date)}</span>
             <span className="num">₹{money(rows.reduce((s, t) => s + t.amount, 0))}</span>
@@ -856,7 +863,12 @@ function Entries({ f, txns, cur, onPick, onTap }) {
 
       {f.period !== "d" && <Bars buckets={buckets} avg={avg} sel={sel} onSel={setSel} />}
 
-      <SpendGrid f={f} pool={pool} buckets={buckets} sel={sel} onSel={setSel}
+      <SpendGrid f={f} pool={pool} buckets={buckets}
+        sel={sel === null ? null : buckets[sel]?.from ?? null}
+        onSel={(k) => {
+          const i = buckets.findIndex((b) => b.from === k);
+          setSel(i === sel ? null : i);
+        }}
         colour={f.kind === "expense" ? NEG : POS} onOpenMonth={f.openMonth} />
 
       <Filters f={f} onPick={onPick} />
@@ -907,8 +919,29 @@ function CategoryDetail({ f, txns, id, onBack, onTap, onPick }) {
     [txns, id, f.kind],
   );
 
+  // Tapping a day here takes you down to that day in the list rather than
+  // filtering to it. The list below already holds every day of the window,
+  // so the cheaper move is to go to the one you asked for and leave its
+  // neighbours in place to keep reading. A day you spent nothing on has no
+  // block to land on, so the tap does nothing at all.
+  const [pick, setPick] = useState(null);
+  const scroller = useRef(null);
+  useEffect(() => { setPick(null); }, [f.period, f.off, f.kind, id]);
+
+  const jump = (k) => {
+    const el = scroller.current?.querySelector(`[data-day="${k}"]`);
+    if (!el) return;
+    setPick(k);
+    // The first days of a month are the last rows of the list, with less
+    // than a screenful under them — those come to rest partway down rather
+    // than at the top. Near enough: the day is on screen either way, and
+    // padding the page to force it up would leave dead space behind.
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+    el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+  };
+
   return (
-    <div className="scroll">
+    <div className="scroll" ref={scroller}>
       <div className="navrow">
         <button className="iconbtn" onClick={onBack} aria-label="Back"><Chevron dir="left" /></button>
         <span className="navtitle" style={{ display: "flex", alignItems: "center", gap: 9 }}>
@@ -926,7 +959,7 @@ function CategoryDetail({ f, txns, id, onBack, onTap, onPick }) {
 
       {f.period !== "d" && <Bars buckets={buckets} avg={avg} colour={c?.c} sel={null} />}
 
-      <SpendGrid f={f} pool={pool} buckets={buckets} sel={null} onSel={() => {}}
+      <SpendGrid f={f} pool={pool} buckets={buckets} sel={pick} onSel={jump} dim={false}
         colour={c?.c} onOpenMonth={f.openMonth} />
 
       <Filters f={f} onPick={onPick} showCat={false} />
