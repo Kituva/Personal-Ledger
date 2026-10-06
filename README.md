@@ -114,8 +114,8 @@ matching. Setup is four steps and every one of them is a copy or a paste:
    the code is what stops anyone else who comes across the address.
 4. Paste the web app URL back into the app, then **Test connection**.
 
-After that it pushes on its own every ten days — the first time you open the app
-once ten days have passed, because a home-screen app cannot wake itself while
+After that it pushes on its own once a day — the first time you open the app
+each day, because a home-screen app cannot wake itself while
 the phone is in your pocket. **Push now** covers the times you don't want to
 wait.
 
@@ -212,7 +212,7 @@ It's on the device and nowhere else. That means no account to create, nothing
 of yours on anyone's server, and it works on a plane.
 
 It also means: **deleting the app deletes the data.** Connecting a Google Sheet
-turns the push into a real backup, ten days stale at worst, and one you can
+turns the push into a real backup, a day stale at worst, and one you can
 import straight back. Without one, exporting a CSV every month or so and keeping
 it somewhere real is the entire disaster recovery plan.
 

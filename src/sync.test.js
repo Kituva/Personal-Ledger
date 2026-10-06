@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   toSheetRows, diffTags, dueForPush, summarise, confirmText,
-  classify, makeCode, PUSH_INTERVAL_DAYS,
+  classify, makeCode,
 } from "./sync.js";
 
 const CATS = {
@@ -89,27 +89,28 @@ describe("diffTags", () => {
 });
 
 describe("dueForPush", () => {
-  const day = 864e5;
-  const now = Date.parse("2026-09-10T09:00:00Z");
+  const hour = 36e5;
+  // Local time, so the tests mean the same thing in any time zone.
+  const now = new Date(2026, 8, 10, 9, 0).getTime();
 
   it("is due when it has never pushed", () => {
     expect(dueForPush(null, now)).toBe(true);
   });
 
-  it("is not due after nine days", () => {
-    expect(dueForPush(now - 9 * day, now)).toBe(false);
+  it("is not due after a push earlier the same day", () => {
+    expect(dueForPush(now - 8 * hour, now)).toBe(false);
   });
 
-  it("is due at exactly ten days", () => {
-    expect(dueForPush(now - PUSH_INTERVAL_DAYS * day, now)).toBe(true);
+  it("is due on the next day, even under 24 hours later", () => {
+    expect(dueForPush(new Date(2026, 8, 9, 23, 0).getTime(), now)).toBe(true);
   });
 
-  it("is due after eleven days", () => {
-    expect(dueForPush(now - 11 * day, now)).toBe(true);
+  it("is due after several days", () => {
+    expect(dueForPush(now - 72 * hour, now)).toBe(true);
   });
 
   it("is due when the clock has moved backwards", () => {
-    expect(dueForPush(now + day, now)).toBe(true);
+    expect(dueForPush(now + hour, now)).toBe(true);
   });
 });
 

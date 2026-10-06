@@ -9,7 +9,7 @@
 
 import React, { useState, useEffect } from "react";
 import { Chevron } from "./icons.jsx";
-import { readSheet, makeCode, PUSH_INTERVAL_DAYS } from "./sync.js";
+import { readSheet, makeCode } from "./sync.js";
 import SCRIPT from "../docs/apps-script/Code.gs?raw";
 
 const PLACEHOLDER = "PASTE-THE-CODE-FROM-THE-APP-HERE";
@@ -134,8 +134,8 @@ export default function SyncScreen({ url, code, lastPushAt, pushing, onSave, onP
       </div>
 
       <div style={{ padding: "4px 4px 20px", fontSize: 12.5, color: "var(--text3)", lineHeight: 1.65 }}>
-        Once connected, the app pushes on its own every {PUSH_INTERVAL_DAYS} days — the first
-        time you open it after that long, since a home-screen app can't wake itself
+        Once connected, the app pushes on its own once a day — the first
+        time you open it each day, since a home-screen app can't wake itself
         up. The sheet ends up matching the app exactly, so entries you correct are
         corrected and entries you delete go away. Anything a push would remove is
         counted and shown to you first. Nothing is ever read back out of the sheet,

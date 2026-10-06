@@ -14,8 +14,6 @@
  * The diff exists to report what moved, and to catch a wipe before it lands.
  */
 
-export const PUSH_INTERVAL_DAYS = 10;
-
 export const SHEET_HEADERS = ["Date", "Amount", "Category", "Description", "Month", "Year", "Tag"];
 
 /* The sheet's own copy of the month names. App.jsx has these for headings, but
@@ -75,17 +73,20 @@ export function diffTags(appTags, sheetTags) {
 }
 
 /**
- * Has it been ten days?
+ * Has it pushed yet today?
+ *
+ * Today is the phone's calendar day, not the last 24 hours — a push at night
+ * should not hold off the one when you open the app next morning.
  *
  * Never having pushed counts as due, so a connection set up and then left alone
  * still reaches the sheet. A timestamp in the future means the clock has moved,
  * not that a push is pending — pushing is idempotent, so the safe reading is to
  * go now and reset the clock.
  */
-export function dueForPush(lastPushAt, now, days = PUSH_INTERVAL_DAYS) {
+export function dueForPush(lastPushAt, now) {
   if (!lastPushAt) return true;
-  const elapsed = now - lastPushAt;
-  return elapsed >= days * 864e5 || elapsed < 0;
+  if (lastPushAt > now) return true;
+  return new Date(lastPushAt).toDateString() !== new Date(now).toDateString();
 }
 
 export function summarise({ added, removed }) {
