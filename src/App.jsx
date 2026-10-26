@@ -825,7 +825,7 @@ function Summary({ f, cur, prevTotal, onPick, onDrill }) {
 /* ============================================================
    Entries
    ============================================================ */
-function Entries({ f, txns, cur, onPick, onTap }) {
+function Entries({ f, txns, cur, onPick, onTap, onDay }) {
   const [sel, setSel] = useState(null);
   const buckets = useMemo(() => bucketize(f.period, f.range, cur), [f.period, f.range, cur]);
 
@@ -848,9 +848,23 @@ function Entries({ f, txns, cur, onPick, onTap }) {
   const elapsed = buckets.filter((b) => b.from <= today);
   const avg = elapsed.length ? elapsed.reduce((s, b) => s + b.v, 0) / elapsed.length : 0;
 
-  const list = sel === null
+  // The picked bar. Its index outlives the window it was picked in by one
+  // render — the reset above runs only after the new buckets are drawn — so
+  // after a switch to a shorter period it can point past the end. That
+  // reads as nothing picked rather than a crash.
+  const bucket = sel === null ? null : buckets[sel] ?? null;
+
+  // The one day on screen, if there is one — a day picked from the chart or
+  // the calendar, or the whole window on Daily — is the day + dates a new
+  // entry to. The chart lets you pick a day still to come, but nothing can
+  // be logged there, so + falls back to today.
+  const day = f.period === "d" ? iso(f.range.start)
+    : bucket && bucket.from === bucket.to && bucket.from <= today ? bucket.from : null;
+  useEffect(() => { onDay(day); return () => onDay(null); }, [day, onDay]);
+
+  const list = bucket === null
     ? cur
-    : cur.filter((t) => t.date >= buckets[sel].from && t.date <= buckets[sel].to);
+    : cur.filter((t) => t.date >= bucket.from && t.date <= bucket.to);
 
   return (
     <div className="scroll">
@@ -864,7 +878,7 @@ function Entries({ f, txns, cur, onPick, onTap }) {
       {f.period !== "d" && <Bars buckets={buckets} avg={avg} sel={sel} onSel={setSel} />}
 
       <SpendGrid f={f} pool={pool} buckets={buckets}
-        sel={sel === null ? null : buckets[sel]?.from ?? null}
+        sel={bucket?.from ?? null}
         onSel={(k) => {
           const i = buckets.findIndex((b) => b.from === k);
           setSel(i === sel ? null : i);
@@ -873,17 +887,17 @@ function Entries({ f, txns, cur, onPick, onTap }) {
 
       <Filters f={f} onPick={onPick} />
 
-      {sel !== null && (
+      {bucket !== null && (
         <button className="pill on" style={{ marginBottom: 16 }} onClick={() => setSel(null)}>
-          {buckets[sel].from === buckets[sel].to
-            ? relDay(buckets[sel].from)
-            : `${relDay(buckets[sel].from)} – ${relDay(buckets[sel].to)}`}
+          {bucket.from === bucket.to
+            ? relDay(bucket.from)
+            : `${relDay(bucket.from)} – ${relDay(bucket.to)}`}
           <span className="pchev"><Close /></span>
         </button>
       )}
 
       <DayGroups list={list} onTap={onTap}
-        empty={sel !== null ? "Nothing logged in that stretch." : `Nothing logged ${f.range.label}.`} />
+        empty={bucket !== null ? "Nothing logged in that stretch." : `Nothing logged ${f.range.label}.`} />
     </div>
   );
 }
@@ -1323,6 +1337,7 @@ export default function App() {
   const [error, setError] = useState(null);
   const [tab, setTab] = useState("summary");
   const [editing, setEditing] = useState(null);
+  const [addDay, setAddDay] = useState(null);
   const [drill, setDrill] = useState(null);
   const [picker, setPicker] = useState(null);
   const [showCats, setShowCats] = useState(false);
@@ -1570,7 +1585,9 @@ export default function App() {
             {tab === "summary" && (
               <Summary f={f} cur={cur} prevTotal={prevTotal} onPick={setPicker} onDrill={setDrill} />
             )}
-            {tab === "entries" && <Entries f={f} txns={txns} cur={cur} onPick={setPicker} onTap={setEditing} />}
+            {tab === "entries" && (
+              <Entries f={f} txns={txns} cur={cur} onPick={setPicker} onTap={setEditing} onDay={setAddDay} />
+            )}
             {tab === "settings" && (
               <SettingsScreen txns={txns} onReplace={replaceAll} onAdd={addMany}
                 onCategories={() => setShowCats(true)} onSheet={() => setShowSync(true)} />
@@ -1589,7 +1606,8 @@ export default function App() {
               </button>
             ))}
           </div>
-          <button className="fab" onClick={() => setEditing({})} aria-label="Add transaction"><Plus /></button>
+          <button className="fab" onClick={() => setEditing(addDay ? { date: addDay } : {})}
+            aria-label="Add transaction"><Plus /></button>
         </nav>
 
         {picker === "period" && (
