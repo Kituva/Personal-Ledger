@@ -582,6 +582,140 @@ button {
 }
 
 /* ============================================================
+   Search — the box at the top of Entries, and what it finds
+   ============================================================ */
+.searchrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.searchbox {
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  background: var(--surface2);
+  border-radius: var(--r-pill);
+  color: var(--text3);
+  transition: box-shadow 0.15s;
+}
+.searchbox:focus-within {
+  box-shadow: 0 0 0 1.5px var(--surface3);
+}
+/* 16px keeps iOS from zooming the viewport on focus. The box draws its own
+   focus ring, so the input's would be a second one inside it. */
+.searchbox input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-size: 16px;
+  font-family: inherit;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.searchbox input:focus-visible {
+  outline: none;
+}
+.searchbox input::placeholder {
+  color: var(--text3);
+}
+/* Safari's own clear button would sit beside ours. */
+.searchbox input::-webkit-search-cancel-button,
+.searchbox input::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.searchclear {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--text3);
+  color: var(--bg);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.searchclear svg {
+  width: 11px;
+  height: 11px;
+}
+
+.searchcancel {
+  font-size: 15.5px;
+  font-weight: 500;
+  color: var(--text);
+  flex-shrink: 0;
+}
+
+.reading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 2px 12px;
+  font-size: 12.5px;
+  color: var(--text2);
+}
+.readchip {
+  background: var(--surface);
+  border: 1px solid var(--surface3);
+  border-radius: var(--r-pill);
+  padding: 3px 9px;
+  color: var(--text);
+}
+
+.restotal {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  background: var(--surface);
+  border-radius: var(--r-card);
+  padding: 13px 16px;
+  margin-bottom: 18px;
+}
+.restotal .n {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text2);
+}
+.restotal .v {
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-align: right;
+}
+.restotal .v.split {
+  font-size: 15.5px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.nearnote {
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--text2);
+  border: 1px dashed var(--surface3);
+  border-radius: 14px;
+  padding: 10px 13px;
+  margin-bottom: 14px;
+}
+.nearnote b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ============================================================
    Floating navigation — a pill, and the add button beside it
    ============================================================ */
 .navwrap {

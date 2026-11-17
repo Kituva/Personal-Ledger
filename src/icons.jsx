@@ -102,3 +102,9 @@ export const More = () => (
     <circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none" />
   </svg>
 );
+
+export const Search = () => (
+  <svg {...svg({ width: 17, height: 17 })}>
+    <circle cx="10.5" cy="10.5" r="6.5" /><line x1="15.5" y1="15.5" x2="20" y2="20" />
+  </svg>
+);

@@ -3,8 +3,9 @@ import * as db from "./db.js";
 import { CatsContext, useCats, bySide, tint, resolveImportCategory } from "./categories.js";
 import {
   Chevron, Arrow, Plus, PieIcon, ListIcon, GearIcon,
-  Backspace, GridIcon, Reset, Check, Trash, Close,
+  Backspace, GridIcon, Reset, Check, Trash, Close, Search,
 } from "./icons.jsx";
+import { readQuery, searchEntries, totalsOf } from "./search.js";
 import CategoriesScreen from "./CategoriesScreen.jsx";
 import SyncScreen from "./SyncScreen.jsx";
 import {
@@ -724,6 +725,19 @@ function TxnRow({ t, onTap, hideCat }) {
   );
 }
 
+/* A day that mixes money out and money in shows the two apart — added
+   together they mean nothing. Only search can draw such a day; every other
+   list holds one side or the other, and looks as it always has. */
+function DayTotal({ rows }) {
+  const { spent, received } = totalsOf(rows);
+  if (!spent || !received) return <span className="num">₹{money(spent + received)}</span>;
+  return (
+    <span className="num">
+      ₹{money(spent)} · <span style={{ color: "var(--pos)" }}>+₹{money(received)}</span>
+    </span>
+  );
+}
+
 function DayGroups({ list, onTap, hideCat, limit = 120, empty = "Nothing here yet." }) {
   const groups = useMemo(() => {
     const m = {};
@@ -739,7 +753,7 @@ function DayGroups({ list, onTap, hideCat, limit = 120, empty = "Nothing here ye
         <div key={date} data-day={date}>
           <div className="dayhead">
             <span>{relDay(date)}</span>
-            <span className="num">₹{money(rows.reduce((s, t) => s + t.amount, 0))}</span>
+            <DayTotal rows={rows} />
           </div>
           <div className="daycard">
             {rows.map((t) => <TxnRow key={t.id} t={t} onTap={onTap} hideCat={hideCat} />)}
@@ -827,6 +841,16 @@ function Summary({ f, cur, prevTotal, onPick, onDrill }) {
    ============================================================ */
 function Entries({ f, txns, cur, onPick, onTap, onDay }) {
   const [sel, setSel] = useState(null);
+
+  // Search lives here rather than in App, so leaving Entries for another tab
+  // empties the box on its own. Cancel resets only these three — the month,
+  // the filters and the picked bar are exactly as they were before you typed.
+  const [q, setQ] = useState("");
+  const [active, setActive] = useState(false);
+  const box = useRef(null);
+  const searching = q.trim() !== "";
+  useEffect(() => { window.scrollTo(0, 0); }, [searching]);
+
   const buckets = useMemo(() => bucketize(f.period, f.range, cur), [f.period, f.range, cur]);
 
   // The calendar's supply: the same narrowing the window uses, minus the
@@ -857,8 +881,9 @@ function Entries({ f, txns, cur, onPick, onTap, onDay }) {
   // The one day on screen, if there is one — a day picked from the chart or
   // the calendar, or the whole window on Daily — is the day + dates a new
   // entry to. The chart lets you pick a day still to come, but nothing can
-  // be logged there, so + falls back to today.
-  const day = f.period === "d" ? iso(f.range.start)
+  // be logged there, so + falls back to today. Search results span every
+  // month, so there is no one day on screen and + is today there too.
+  const day = searching ? null : f.period === "d" ? iso(f.range.start)
     : bucket && bucket.from === bucket.to && bucket.from <= today ? bucket.from : null;
   useEffect(() => { onDay(day); return () => onDay(null); }, [day, onDay]);
 
@@ -868,37 +893,129 @@ function Entries({ f, txns, cur, onPick, onTap, onDay }) {
 
   return (
     <div className="scroll">
-      <PeriodNav f={f} />
-
-      <div className="shead">
-        <div className="slabel">{f.kind === "expense" ? "Expenses" : "Income"} {f.range.label}</div>
-        <div className="stotal num">₹{money(shown)}</div>
+      <div className="searchrow">
+        <label className="searchbox">
+          <Search />
+          <input ref={box} type="search" value={q} placeholder="Search all entries"
+            aria-label="Search all entries" enterKeyHint="search"
+            autoCapitalize="off" autoCorrect="off" spellCheck={false}
+            onChange={(e) => setQ(e.target.value)}
+            onFocus={() => setActive(true)} onBlur={() => setActive(false)}
+            onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }} />
+          {q && (
+            // Holding focus through the press keeps the keyboard up, so you
+            // can clear and retype without tapping back into the box.
+            <button type="button" className="searchclear" aria-label="Clear search"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { setQ(""); box.current?.focus(); }}>
+              <Close />
+            </button>
+          )}
+        </label>
+        {(active || searching) && (
+          <button type="button" className="searchcancel"
+            onClick={() => { setQ(""); setActive(false); box.current?.blur(); }}>
+            Cancel
+          </button>
+        )}
       </div>
 
-      {f.period !== "d" && <Bars buckets={buckets} avg={avg} sel={sel} onSel={setSel} />}
+      {searching ? <SearchResults txns={txns} q={q} onTap={onTap} /> : (
+        <>
+          <PeriodNav f={f} />
 
-      <SpendGrid f={f} pool={pool} buckets={buckets}
-        sel={bucket?.from ?? null}
-        onSel={(k) => {
-          const i = buckets.findIndex((b) => b.from === k);
-          setSel(i === sel ? null : i);
-        }}
-        colour={f.kind === "expense" ? NEG : POS} onOpenMonth={f.openMonth} />
+          <div className="shead">
+            <div className="slabel">{f.kind === "expense" ? "Expenses" : "Income"} {f.range.label}</div>
+            <div className="stotal num">₹{money(shown)}</div>
+          </div>
 
-      <Filters f={f} onPick={onPick} />
+          {f.period !== "d" && <Bars buckets={buckets} avg={avg} sel={sel} onSel={setSel} />}
 
-      {bucket !== null && (
-        <button className="pill on" style={{ marginBottom: 16 }} onClick={() => setSel(null)}>
-          {bucket.from === bucket.to
-            ? relDay(bucket.from)
-            : `${relDay(bucket.from)} – ${relDay(bucket.to)}`}
-          <span className="pchev"><Close /></span>
-        </button>
+          <SpendGrid f={f} pool={pool} buckets={buckets}
+            sel={bucket?.from ?? null}
+            onSel={(k) => {
+              const i = buckets.findIndex((b) => b.from === k);
+              setSel(i === sel ? null : i);
+            }}
+            colour={f.kind === "expense" ? NEG : POS} onOpenMonth={f.openMonth} />
+
+          <Filters f={f} onPick={onPick} />
+
+          {bucket !== null && (
+            <button className="pill on" style={{ marginBottom: 16 }} onClick={() => setSel(null)}>
+              {bucket.from === bucket.to
+                ? relDay(bucket.from)
+                : `${relDay(bucket.from)} – ${relDay(bucket.to)}`}
+              <span className="pchev"><Close /></span>
+            </button>
+          )}
+
+          <DayGroups list={list} onTap={onTap}
+            empty={bucket !== null ? "Nothing logged in that stretch." : `Nothing logged ${f.range.label}.`} />
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   Search results — what the box on Entries finds
+   ============================================================ */
+const SEARCH_DAYS = 120;
+
+function SearchResults({ txns, q, onTap }) {
+  const { byId } = useCats();
+  const years = useMemo(() => new Set(txns.map((t) => Number(t.date.slice(0, 4)))), [txns]);
+  const words = useMemo(() => readQuery(q, { years }), [q, years]);
+  const { list, near } = useMemo(() => searchEntries(txns, words, byId), [txns, words, byId]);
+  const { spent, received } = totalsOf(list);
+  const days = useMemo(() => new Set(list.map((t) => t.date)).size, [list]);
+  const n = list.length;
+
+  return (
+    <>
+      {words.length > 0 && (
+        <div className="reading">
+          Looking for
+          {words.map((w, i) => <span key={i} className="readchip">{w.label}</span>)}
+        </div>
       )}
 
-      <DayGroups list={list} onTap={onTap}
-        empty={bucket !== null ? "Nothing logged in that stretch." : `Nothing logged ${f.range.label}.`} />
-    </div>
+      {n === 0 ? (
+        <div className="empty">Nothing matches "{q.trim()}".</div>
+      ) : (
+        <>
+          {near !== null && (
+            <div className="nearnote">
+              Nothing for exactly <b>₹{near.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</b>.
+              {" "}These are the nearest amounts.
+            </div>
+          )}
+
+          <div className="restotal">
+            <span className="n">{n === 1 ? "1 entry" : `${n} entries`}</span>
+            {spent && received ? (
+              <span className="v split num">
+                ₹{money(spent)} spent<br />
+                <span style={{ color: "var(--pos)" }}>+₹{money(received)} received</span>
+              </span>
+            ) : received ? (
+              <span className="v num" style={{ color: "var(--pos)" }}>+₹{money(received)}</span>
+            ) : (
+              <span className="v num">₹{money(spent)}</span>
+            )}
+          </div>
+
+          <DayGroups list={list} onTap={onTap} limit={SEARCH_DAYS} />
+
+          {days > SEARCH_DAYS && (
+            <div className="empty" style={{ padding: "4px 20px 20px" }}>
+              Showing the newest {SEARCH_DAYS} days of matches. Add a word to narrow it down.
+            </div>
+          )}
+        </>
+      )}
+    </>
   );
 }
 

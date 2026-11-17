@@ -45,6 +45,7 @@ persistent storage, and the safe-area handling around the notch.
 | `src/categories.js` | Categories as data: the defaults, and the rules about what may be renamed, deleted or re-sided. |
 | `src/CategoriesScreen.jsx` | The Categories screen, reached from Settings. |
 | `src/CategorySheet.jsx` | Add or edit one category. |
+| `src/search.js` | How a search is read and matched: dates, amounts and words. |
 | `src/icons.jsx` | The drawn icons, shared by every screen. |
 | `src/sync.js` | The Google Sheet push: what to write, what changed, when it's due. |
 | `src/SyncScreen.jsx` | Connecting a sheet, reached from Settings. |
@@ -187,6 +188,26 @@ touching a single entry.
 Order is the order you see, never alphabetical. The original fourteen keep the
 positions they have always had and anything you add goes to the end of its
 section, so the grid you pick from every day doesn't rearrange itself under you.
+
+## Search
+
+The box at the top of **Entries** looks through every entry you have, from
+every month, spent and received alike. Type whatever you remember about the
+one you're after: a word from the description, part of a category's name, the
+amount, the date, or a mix. Every word has to match the same entry, so adding
+a word narrows the list. The month and filters you had set don't apply while
+you search, and **Cancel** puts them back exactly as they were.
+
+Numbers are amounts. Month names are dates, in any year: `oct`, `12 oct`,
+`oct 2025`. Dates written out are day first, like everywhere else here, so
+`12/10/2025` is the 12th of October. A year on its own is the one guess the
+box has to make. `2025` finds that year *and* ₹2,025, and the line under the
+box says it read it both ways. Every guess widens the results rather than
+narrowing them, so nothing is hidden by one.
+
+Amounts are matched exactly. If that finds nothing, the search is run again
+with the amount loosened to within a tenth either side, and it says so,
+because ₹520 remembered for a ₹500 entry is the usual miss.
 
 ## The two charts
 
