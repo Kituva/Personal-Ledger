@@ -65,9 +65,11 @@ function readToken(text, years) {
 }
 
 /* Only for joining tokens into a date phrase. A day is a bare whole number,
-   so "₹12" next to a month stays an amount. */
+   so "₹12" next to a month stays an amount. A year is one you have entries
+   in, the same rule as a year on its own — "12 oct 2000" is the 12th of
+   October and ₹2,000, not a day in a year with nothing in it. */
 const isDay = (t) => !!t && /^\d{1,2}$/.test(t.text) && Number(t.text) >= 1 && Number(t.text) <= 31;
-const isYear = (t) => !!t && /^\d{4}$/.test(t.text) && Number(t.text) >= 1900 && Number(t.text) <= 2099;
+const isYear = (t, years) => !!t && /^\d{4}$/.test(t.text) && years.has(Number(t.text));
 const isMonth = (t) => !!t && monthOf(t.text) !== null;
 
 function dateLabel({ y, m, d }) {
@@ -106,11 +108,11 @@ export function readQuery(text, { years = new Set() } = {}) {
     if (isDay(t[i]) && isMonth(t[i + 1])) {
       date = { m: monthOf(t[i + 1].text), d: Number(t[i].text) };
       j = i + 2;
-      if (isYear(t[j])) date.y = Number(t[j++].text);
+      if (isYear(t[j], years)) date.y = Number(t[j++].text);
     } else if (isMonth(t[i])) {
       date = { m: monthOf(t[i].text) };
       if (isDay(t[j])) date.d = Number(t[j++].text);
-      if (isYear(t[j])) date.y = Number(t[j++].text);
+      if (isYear(t[j], years)) date.y = Number(t[j++].text);
     }
     const tokens = t.slice(i, j);
     if (tokens.length > 1) words.push({ tokens, date, label: dateLabel(date) });
@@ -131,25 +133,46 @@ function dateMatches(spec, iso) {
     && (spec.d === undefined || spec.d === d);
 }
 
-/* `loose` widens an amount to within 10% either side — the second pass, run
-   only when the exact one found nothing. */
+/* A month's letters count as text only at the start of a word: "dec" finds
+   Decathlon, but "oct" must not bring in every doctor's visit in the ledger
+   under a line that says "any October". A month token is letters only, so
+   it needs no escaping. */
+function textMatches(tok, hay) {
+  if (monthOf(tok.text) === null) return hay.includes(tok.text);
+  return new RegExp(`(^|[^a-z0-9])${tok.text}`).test(hay);
+}
+
+/* An amount matches as its row shows it: the list rounds to the rupee, so a
+   ₹1,999.60 entry reads ₹2,000 and typing 2000 has to find it. A number
+   with paise in it is matched to the paisa.
+
+   `loose` is the one token being widened to within 10% either side — the
+   second pass, run only when the exact one found nothing. */
 function tokenMatches(tok, t, byId, loose) {
   const name = (byId[t.cat]?.name ?? "").toLowerCase();
   const note = (t.note ?? "").toLowerCase();
-  if (name.includes(tok.text) || note.includes(tok.text)) return true;
+  if (textMatches(tok, name) || textMatches(tok, note)) return true;
   if (tok.amount !== null) {
     const off = Math.abs(t.amount - tok.amount);
-    if (loose ? off <= tok.amount * 0.1 : off < 0.005) return true;
+    if (tok === loose ? off <= tok.amount * 0.1
+      : off < 0.005 || (Number.isInteger(tok.amount) && Math.round(t.amount) === tok.amount)) return true;
   }
   return tok.date !== null && dateMatches(tok.date, t.date);
 }
 
-/* A date phrase is tried as the date it makes and, failing that, word by
-   word. "oct 25" is the 25th of October — and also an October entry of ₹25,
-   which reading it only as a date would hide. */
-const wordMatches = (w, t, byId, loose) =>
-  (w.date !== null && dateMatches(w.date, t.date))
-  || w.tokens.every((tok) => tokenMatches(tok, t, byId, loose));
+/* A date phrase is tried as the date it makes, then with its year read as
+   an amount, then word by word. "12 oct 2026" is that day in 2026, and also
+   a ₹2,026 entry on the 12th of October; "oct 25" is the 25th of October,
+   and also an October entry of ₹25. Reading either only as a date would
+   hide the other. */
+function wordMatches(w, t, byId, loose) {
+  if (w.date !== null) {
+    if (dateMatches(w.date, t.date)) return true;
+    if (w.date.y !== undefined && dateMatches({ ...w.date, y: undefined }, t.date)
+      && tokenMatches(w.tokens[w.tokens.length - 1], t, byId, loose)) return true;
+  }
+  return w.tokens.every((tok) => tokenMatches(tok, t, byId, loose));
+}
 
 const run = (txns, words, byId, loose) =>
   txns.filter((t) => words.every((w) => wordMatches(w, t, byId, loose)));
@@ -157,7 +180,7 @@ const run = (txns, words, byId, loose) =>
 /**
  * The entries every word matches, in the order given.
  *
- * When that is nothing and the search had an amount in it, the amount is
+ * When that is nothing and the search had an amount in it, that amount is
  * loosened to the nearest ones — remembering ₹520 for a ₹500 entry is the
  * common miss. `near` says which amount was loosened, so the screen can say
  * the results aren't exact. Exact always wins: nothing is loosened while
@@ -165,11 +188,15 @@ const run = (txns, words, byId, loose) =>
  */
 export function searchEntries(txns, words, byId) {
   if (!words.length) return { list: [], near: null };
-  const list = run(txns, words, byId, false);
+  const list = run(txns, words, byId, null);
   if (list.length) return { list, near: null };
-  const amt = words.flatMap((w) => w.tokens).find((tok) => tok.amount !== null);
+  // The amount you typed, ahead of a day or a year that also reads as one —
+  // "12 oct 17500" loosens the ₹17,500, never the 12.
+  const plain = words.flatMap((w) => (w.date === null ? w.tokens : []));
+  const amt = plain.find((tok) => tok.amount !== null && tok.date === null)
+    ?? words.flatMap((w) => w.tokens).find((tok) => tok.amount !== null);
   if (!amt) return { list, near: null };
-  const nearest = run(txns, words, byId, true);
+  const nearest = run(txns, words, byId, amt);
   return { list: nearest, near: nearest.length ? amt.amount : null };
 }
 

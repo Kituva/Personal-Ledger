@@ -35,10 +35,15 @@ describe("readQuery", () => {
   });
 
   it("joins a year after a month, with or without a day", () => {
-    expect(readQuery("oct 2025")[0].date).toEqual({ y: 2025, m: 10 });
-    expect(labels("oct 2025")).toEqual(["📅 October 2025"]);
-    expect(readQuery("12 oct 2025")[0].date).toEqual({ y: 2025, m: 10, d: 12 });
-    expect(labels("oct, 2025")).toEqual(["📅 October 2025"]);
+    const years = new Set([2025]);
+    expect(readQuery("oct 2025", { years })[0].date).toEqual({ y: 2025, m: 10 });
+    expect(labels("oct 2025", { years })).toEqual(["📅 October 2025"]);
+    expect(readQuery("12 oct 2025", { years })[0].date).toEqual({ y: 2025, m: 10, d: 12 });
+    expect(labels("oct, 2025", { years })).toEqual(["📅 October 2025"]);
+  });
+
+  it("reads a number after a month as a year only for years with entries", () => {
+    expect(labels("oct 2000", { years: new Set([2025]) })).toEqual(["📅 any October", "₹2,000"]);
   });
 
   it("leaves a number that cannot be a day as its own word", () => {
@@ -101,8 +106,8 @@ describe("searchEntries", () => {
   it("needs every word to match the same entry", () => {
     expect(ids("petrol oct")).toEqual(["p1"]);
   });
-  it("matches an amount exactly, decimals included", () => {
-    expect(ids("500")).toEqual(["p1", "g1"]);
+  it("matches an amount as its row shows it, decimals included", () => {
+    expect(ids("500")).toEqual(["p1", "g1", "x1"]);
     expect(ids("499.5")).toEqual(["x1"]);
   });
   it("matches a number inside a description", () => {
@@ -144,5 +149,37 @@ describe("searchEntries", () => {
 describe("totalsOf", () => {
   it("keeps money spent and money received apart", () => {
     expect(totalsOf([TXNS[0], TXNS[4], TXNS[2]])).toEqual({ spent: 1000, received: 60000 });
+  });
+});
+
+describe("searchEntries, cases the review found", () => {
+  const Y = { years: new Set([2025, 2026]) };
+  const find = (txns, q) => searchEntries(txns, readQuery(q, Y), CATS);
+
+  it("names the amount you typed when it loosens, not a day", () => {
+    const rent = t("r", { cat: "groc", note: "Rent", amount: 18000, date: "2025-10-12" });
+    expect(find([rent], "12 oct 17500")).toEqual({ list: [rent], near: 17500 });
+  });
+  it("names the amount you typed when it loosens, not a year", () => {
+    const fuel = t("f", { cat: "trans", note: "Petrol", amount: 500, date: "2025-10-05" });
+    expect(find([fuel], "oct 2025 520")).toEqual({ list: [fuel], near: 520 });
+  });
+  it("does not take a four-digit amount after a date for a year", () => {
+    const bb = t("bb", { cat: "groc", note: "Big basket", amount: 2000, date: "2025-10-12" });
+    expect(find([bb], "12 oct 2000")).toEqual({ list: [bb], near: null });
+  });
+  it("finds the amount even when it is also a year you have entries in", () => {
+    const shoes = t("sh", { cat: "personal", note: "Shoes", amount: 2026, date: "2025-10-12" });
+    expect(find([shoes], "12 oct 2026")).toEqual({ list: [shoes], near: null });
+  });
+  it("finds an amount with paise by the rupees its row shows", () => {
+    const oil = t("io", { cat: "trans", note: "Indian Oil", amount: 1999.6, date: "2025-07-01" });
+    expect(find([oil], "2000")).toEqual({ list: [oil], near: null });
+  });
+  it("matches a month's letters only at the start of a word", () => {
+    const doc = t("dr", { cat: "health", note: "Doctor visit", amount: 500, date: "2025-03-10" });
+    const socks = t("so", { cat: "personal", note: "Decathlon socks", amount: 900, date: "2025-03-11" });
+    expect(find([doc, socks], "oct").list).toEqual([]);
+    expect(find([doc, socks], "dec").list).toEqual([socks]);
   });
 });
