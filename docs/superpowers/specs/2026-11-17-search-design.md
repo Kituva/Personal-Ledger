@@ -53,14 +53,18 @@ A word matches an entry if it matches any one of the following:
 - **Text.** The word appears anywhere in the category name or the description.
   Capitals don't matter and part of a word is enough, so "gro" finds Groceries.
 - **Amount.** A number (with or without ₹ or thousands commas, decimals
-  allowed) equals the entry's amount. A number also matches as text, so "199"
-  finds "Netflix 199 plan".
+  allowed) equals the entry's amount as its row shows it, so 2000 finds a
+  ₹1,999.60 entry that the list rounds to ₹2,000. A number also matches as
+  text, so "199" finds "Netflix 199 plan".
 - **Month.** A month name, full or at least three letters ("oct", "october",
   "sept"), matches entries from that month of any year. A month word also
-  matches as text, so "dec" finds both December entries and "Decathlon".
+  matches as text at the start of a word, so "dec" finds both December
+  entries and "Decathlon", but "oct" doesn't find "Doctor".
 - **Day or year with a month.** A number written next to a month word is read
   with it: "12 oct" and "oct 12" mean the 12th of October in any year, and
-  "oct 2025" means October 2025. "12 oct 2025" is a single day.
+  "oct 2025" means October 2025. "12 oct 2025" is a single day. A number is
+  only read as a year here if you have entries from that year, so
+  "12 oct 2000" means the 12th of October, ₹2,000.
 - **Dates written in numbers**, day first like the rest of the app:
   `12/10/2025`, `12-10-2025`, `12/10` (any year), and `2025-10-12`.
 - **A year on its own.** "2025" is the one case where the box has to guess:
