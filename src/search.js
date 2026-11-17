@@ -119,3 +119,64 @@ export function readQuery(text, { years = new Set() } = {}) {
   }
   return words;
 }
+
+/* ============================================================
+   Matching
+   ============================================================ */
+
+function dateMatches(spec, iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  return (spec.y === undefined || spec.y === y)
+    && (spec.m === undefined || spec.m === m)
+    && (spec.d === undefined || spec.d === d);
+}
+
+/* `loose` widens an amount to within 10% either side — the second pass, run
+   only when the exact one found nothing. */
+function tokenMatches(tok, t, byId, loose) {
+  const name = (byId[t.cat]?.name ?? "").toLowerCase();
+  const note = (t.note ?? "").toLowerCase();
+  if (name.includes(tok.text) || note.includes(tok.text)) return true;
+  if (tok.amount !== null) {
+    const off = Math.abs(t.amount - tok.amount);
+    if (loose ? off <= tok.amount * 0.1 : off < 0.005) return true;
+  }
+  return tok.date !== null && dateMatches(tok.date, t.date);
+}
+
+/* A date phrase is tried as the date it makes and, failing that, word by
+   word. "oct 25" is the 25th of October — and also an October entry of ₹25,
+   which reading it only as a date would hide. */
+const wordMatches = (w, t, byId, loose) =>
+  (w.date !== null && dateMatches(w.date, t.date))
+  || w.tokens.every((tok) => tokenMatches(tok, t, byId, loose));
+
+const run = (txns, words, byId, loose) =>
+  txns.filter((t) => words.every((w) => wordMatches(w, t, byId, loose)));
+
+/**
+ * The entries every word matches, in the order given.
+ *
+ * When that is nothing and the search had an amount in it, the amount is
+ * loosened to the nearest ones — remembering ₹520 for a ₹500 entry is the
+ * common miss. `near` says which amount was loosened, so the screen can say
+ * the results aren't exact. Exact always wins: nothing is loosened while
+ * anything matches as typed.
+ */
+export function searchEntries(txns, words, byId) {
+  if (!words.length) return { list: [], near: null };
+  const list = run(txns, words, byId, false);
+  if (list.length) return { list, near: null };
+  const amt = words.flatMap((w) => w.tokens).find((tok) => tok.amount !== null);
+  if (!amt) return { list, near: null };
+  const nearest = run(txns, words, byId, true);
+  return { list: nearest, near: nearest.length ? amt.amount : null };
+}
+
+/** Money out and money in, kept apart — added together they mean nothing. */
+export function totalsOf(list) {
+  let spent = 0;
+  let received = 0;
+  list.forEach((t) => { if (t.type === "income") received += t.amount; else spent += t.amount; });
+  return { spent, received };
+}

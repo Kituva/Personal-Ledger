@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readQuery } from "./search.js";
+import { readQuery, searchEntries, totalsOf } from "./search.js";
 
 const labels = (q, o) => readQuery(q, o).map((w) => w.label);
 
@@ -69,5 +69,80 @@ describe("readQuery", () => {
     expect(readQuery(",")).toEqual([]);
     expect(readQuery("₹")[0].tokens[0]).toEqual({ text: "₹", amount: null, date: null });
     expect(readQuery("12/")[0].tokens[0].date).toBe(null);
+  });
+});
+
+const CATS = {
+  groc: { name: "Groceries" }, trans: { name: "Transportation" }, subs: { name: "Subscriptions" },
+  personal: { name: "Personal" }, dining: { name: "Dining Out" }, sal: { name: "Salary" },
+};
+const t = (id, o) => ({ id, type: "expense", note: "", ...o });
+const TXNS = [
+  t("p1", { cat: "trans", note: "Petrol", amount: 500, date: "2026-10-14" }),
+  t("d1", { cat: "personal", note: "Decathlon socks", amount: 2025, date: "2026-03-03" }),
+  t("s1", { type: "income", cat: "sal", amount: 60000, date: "2025-12-01" }),
+  t("n1", { cat: "subs", note: "Netflix 199 plan", amount: 649, date: "2025-11-02" }),
+  t("g1", { cat: "groc", amount: 500, date: "2025-10-06" }),
+  t("o25", { cat: "dining", note: "Tea", amount: 25, date: "2025-10-03" }),
+  t("x1", { cat: "gone", note: "Plumber", amount: 499.5, date: "2025-09-09" }),
+  t("p2", { cat: "trans", note: "Petrol", amount: 550, date: "2025-08-22" }),
+];
+const YEARS = new Set([2025, 2026]);
+const run = (q) => searchEntries(TXNS, readQuery(q, { years: YEARS }), CATS);
+const ids = (q) => run(q).list.map((x) => x.id);
+
+describe("searchEntries", () => {
+  it("matches part of a category name, in any case", () => {
+    expect(ids("GRO")).toEqual(["g1"]);
+  });
+  it("matches the description", () => {
+    expect(ids("petrol")).toEqual(["p1", "p2"]);
+  });
+  it("needs every word to match the same entry", () => {
+    expect(ids("petrol oct")).toEqual(["p1"]);
+  });
+  it("matches an amount exactly, decimals included", () => {
+    expect(ids("500")).toEqual(["p1", "g1"]);
+    expect(ids("499.5")).toEqual(["x1"]);
+  });
+  it("matches a number inside a description", () => {
+    expect(ids("199")).toEqual(["n1"]);
+  });
+  it("matches a month in any year, and the same letters as text", () => {
+    expect(ids("dec")).toEqual(["d1", "s1"]);
+  });
+  it("matches a day and month in any year", () => {
+    expect(ids("14 oct")).toEqual(["p1"]);
+  });
+  it("never lets the date reading hide the other one", () => {
+    expect(ids("oct 25")).toEqual(["o25"]);
+  });
+  it("matches a bare year as the year, the amount or the text", () => {
+    expect(ids("2025")).toEqual(["d1", "s1", "n1", "g1", "o25", "x1", "p2"]);
+  });
+  it("still matches an entry whose category was deleted", () => {
+    expect(ids("plumber")).toEqual(["x1"]);
+    expect(ids("gro")).toEqual(["g1"]);
+  });
+  it("falls back to amounts within 10% when nothing is exact", () => {
+    expect(run("petrol 520")).toEqual({ list: [TXNS[0], TXNS[7]], near: 520 });
+  });
+  it("does not loosen when something is exact", () => {
+    expect(run("petrol 500")).toEqual({ list: [TXNS[0]], near: null });
+  });
+  it("says nothing about nearest amounts when there are none", () => {
+    expect(run("zzz 520")).toEqual({ list: [], near: null });
+  });
+  it("does not loosen without a number", () => {
+    expect(run("zzz")).toEqual({ list: [], near: null });
+  });
+  it("matches nothing for no words", () => {
+    expect(searchEntries(TXNS, [], CATS)).toEqual({ list: [], near: null });
+  });
+});
+
+describe("totalsOf", () => {
+  it("keeps money spent and money received apart", () => {
+    expect(totalsOf([TXNS[0], TXNS[4], TXNS[2]])).toEqual({ spent: 1000, received: 60000 });
   });
 });
