@@ -60,3 +60,30 @@ export function readBankMessage(text) {
   const ref = find(lines, REF);
   return { amount, date, payee, ref: ref ? ref[1] : null };
 }
+
+/** How payee names are compared: capitals and spacing don't count. The bank
+    cuts long names at the same place every time, so no fuzzier match is
+    needed. */
+const payeeKey = (s) => String(s).replace(/\s+/g, " ").trim().toLowerCase();
+
+/** The category of the newest Spent entry pasted from this payee, or null.
+    Entries are compared by the bank's payee name, kept out of sight on each
+    pasted entry, never by the description, so renaming an entry doesn't
+    break the memory. On a tie in date, the entry earlier in the list wins:
+    the app keeps the most recently added first. */
+export function rememberedCat(txns, payee) {
+  const key = payeeKey(payee);
+  let best = null;
+  for (const t of txns) {
+    if (!t.payee || t.type === "income" || payeeKey(t.payee) !== key) continue;
+    if (!best || t.date > best.date) best = t;
+  }
+  return best ? best.cat : null;
+}
+
+/** The entry already carrying this bank reference, or null. Every payment
+    has its own reference, so a match means the payment is already logged. */
+export function findByRef(txns, ref) {
+  if (!ref) return null;
+  return txns.find((t) => t.ref === ref) || null;
+}

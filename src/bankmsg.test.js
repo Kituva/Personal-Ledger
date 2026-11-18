@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readBankMessage } from "./bankmsg.js";
+import { readBankMessage, rememberedCat, findByRef } from "./bankmsg.js";
 
 /* HDFC's UPI "Sent" layout, with made-up details. */
 const msg = ({ amount = "225.00", to = "GREEN LEAF STORES", on = "14/11/26", ref = "600000000001" } = {}) =>
@@ -62,5 +62,49 @@ describe("readBankMessage", () => {
     expect(readBankMessage("Petrol")).toBe(null);
     expect(readBankMessage(msg().replace(/\n/g, ""))).toBe(null);
     expect(readBankMessage("Received Rs.500.00\nIn HDFC Bank A/C *1234\nFrom SOMEONE\nOn 14/11/26")).toBe(null);
+  });
+});
+
+const e = (o) => ({ id: "t1", amount: 100, type: "expense", cat: "food", note: "x", date: "2026-11-10", ...o });
+
+describe("rememberedCat", () => {
+  it("uses the newest Spent entry pasted from the same payee", () => {
+    const txns = [
+      e({ id: "a", payee: "GREEN LEAF STORES", cat: "food", date: "2026-11-10" }),
+      e({ id: "b", payee: "GREEN LEAF STORES", cat: "groceries", date: "2026-11-14" }),
+      e({ id: "c", payee: "RAVI K", cat: "transport", date: "2026-11-16" }),
+    ];
+    expect(rememberedCat(txns, "GREEN LEAF STORES")).toBe("groceries");
+  });
+
+  it("matches payees ignoring capitals and extra spaces", () => {
+    expect(rememberedCat([e({ payee: "Ravi  K", cat: "transport" })], "RAVI K")).toBe("transport");
+  });
+
+  it("ignores renamed descriptions, hand-typed entries and money received", () => {
+    const txns = [
+      e({ id: "a", payee: "GREEN LEAF STORES", note: "Vegetables", cat: "groceries", date: "2026-11-01" }),
+      e({ id: "b", note: "GREEN LEAF STORES", cat: "food", date: "2026-11-12" }),
+      e({ id: "c", payee: "GREEN LEAF STORES", type: "income", cat: "salary", date: "2026-11-14" }),
+    ];
+    expect(rememberedCat(txns, "GREEN LEAF STORES")).toBe("groceries");
+  });
+
+  it("is null for a payee never pasted before", () => {
+    expect(rememberedCat([], "GREEN LEAF STORES")).toBe(null);
+    expect(rememberedCat([e({ payee: "RAVI K" })], "GREEN LEAF STORES")).toBe(null);
+  });
+});
+
+describe("findByRef", () => {
+  const txns = [e({ id: "a", ref: "600000000001" }), e({ id: "b" })];
+
+  it("finds the entry already carrying a reference", () => {
+    expect(findByRef(txns, "600000000001").id).toBe("a");
+  });
+
+  it("is null with no reference or no match", () => {
+    expect(findByRef(txns, null)).toBe(null);
+    expect(findByRef(txns, "600000000999")).toBe(null);
   });
 });
