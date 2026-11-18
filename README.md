@@ -46,6 +46,7 @@ persistent storage, and the safe-area handling around the notch.
 | `src/CategoriesScreen.jsx` | The Categories screen, reached from Settings. |
 | `src/CategorySheet.jsx` | Add or edit one category. |
 | `src/search.js` | How a search is read and matched: dates, amounts and words. |
+| `src/bankmsg.js` | Reading a pasted HDFC UPI message, and remembering each payee's category. |
 | `src/icons.jsx` | The drawn icons, shared by every screen. |
 | `src/sync.js` | The Google Sheet push: what to write, what changed, when it's due. |
 | `src/SyncScreen.jsx` | Connecting a sheet, reached from Settings. |
@@ -208,6 +209,27 @@ narrowing them, so nothing is hidden by one.
 Amounts are matched exactly. If that finds nothing, the search is run again
 with the amount loosened to within a tenth either side, and it says so,
 because ₹520 remembered for a ₹500 entry is the usual miss.
+
+## Pasting a bank message
+
+Copy an HDFC UPI "Sent Rs." text from Messages, tap **+**, and paste it into
+*What was it for?* The amount, the date, **Spent** and the payee fill
+themselves in, and the keyboard closes so you can see them. Only that one
+message is read. Anything else you paste, including other banks, cards and
+money received, lands in the box as text, the same as before. So does
+anything pasted while editing an entry you already have.
+
+The first time you pay someone, you pick the category yourself. After that
+it's remembered: the next message from the same payee picks the category of
+the newest entry pasted from them. To make that work, each pasted entry
+quietly keeps the bank's payee name and reference number. You can rename the
+description freely without losing them. They stay on the phone and never go
+to the Google Sheet or into the CSV export, so restoring from a CSV brings
+your entries back but starts the memory fresh.
+
+Every payment has its own reference. Paste one you've already logged and a
+red line under the amount says when and as what. It doesn't stop you saving,
+because one payment split across two entries shares a reference.
 
 ## The two charts
 

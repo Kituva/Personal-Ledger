@@ -6,6 +6,7 @@ import {
   Backspace, GridIcon, Reset, Check, Trash, Close, Search,
 } from "./icons.jsx";
 import { readQuery, searchEntries, totalsOf } from "./search.js";
+import { readBankMessage, rememberedCat, findByRef } from "./bankmsg.js";
 import CategoriesScreen from "./CategoriesScreen.jsx";
 import SyncScreen from "./SyncScreen.jsx";
 import {
@@ -47,6 +48,13 @@ function relDay(dstr) {
   const d = parseISO(dstr);
   const sameYear = d.getFullYear() === new Date().getFullYear();
   return `${MONTHS[d.getMonth()]} ${d.getDate()}${sameYear ? "" : ", " + d.getFullYear()}`;
+}
+
+/** "14 Nov", with the year only when it isn't this one. */
+function shortDay(dstr) {
+  const d = parseISO(dstr);
+  const year = d.getFullYear() === new Date().getFullYear() ? "" : ` ${d.getFullYear()}`;
+  return `${d.getDate()} ${MON[d.getMonth()]}${year}`;
 }
 
 /* ============================================================
@@ -1301,7 +1309,7 @@ function Calendar({ value, onPick }) {
 /* ============================================================
    Entry sheet — add and edit
    ============================================================ */
-function EntrySheet({ txn, onSave, onDelete, onClose }) {
+function EntrySheet({ txn, txns, onSave, onDelete, onClose }) {
   const { expense, income } = useCats();
   const isEdit = Boolean(txn.id);
   const [amt, setAmt] = useState(isEdit ? String(txn.amount) : "");
@@ -1312,6 +1320,8 @@ function EntrySheet({ txn, onSave, onDelete, onClose }) {
   const [grid, setGrid] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
   const [cal, setCal] = useState(false);
+  // The bank's payee and reference from a message pasted into this new entry.
+  const [bank, setBank] = useState(null);
 
   const choices = type === "income" ? income : expense;
   const sel = cat ? choices.find((c) => c.id === cat) : null;
@@ -1334,9 +1344,36 @@ function EntrySheet({ txn, onSave, onDelete, onClose }) {
     : null;
   const valid = !missing;
 
+  /* A bank message pasted into the description of a new entry fills in the
+     rest. It has to be read from the paste itself: a one-line box strips the
+     message's line breaks on the way in, running the payee into the date.
+     Anything that isn't a message pastes as normal, and so does everything
+     while editing, so a stray paste can never overwrite an existing entry. */
+  const pasteBank = (e) => {
+    if (isEdit) return;
+    const m = readBankMessage(e.clipboardData.getData("text/plain"));
+    if (!m) return;
+    e.preventDefault();
+    setAmt(String(m.amount));
+    setType("expense");
+    setDate(m.date);
+    setNote(m.payee);
+    setCat(rememberedCat(txns, m.payee));
+    setBank({ payee: m.payee, ref: m.ref });
+    setGrid(false);
+    setCal(false);
+    e.currentTarget.blur();
+  };
+
+  // Only a warning: one payment split into two entries shares a reference.
+  const already = !isEdit && bank?.ref ? findByRef(txns, bank.ref) : null;
+
   const submit = () => {
     if (!valid) return;
-    onSave({ ...(isEdit ? txn : {}), amount: parseFloat(amt), type, cat, note: note.trim(), date });
+    // Kept on the entry, out of sight, for the payee memory and the repeat
+    // check. Edits carry them across in `txn`.
+    const pasted = !isEdit && bank ? { payee: bank.payee, ...(bank.ref ? { ref: bank.ref } : {}) } : {};
+    onSave({ ...(isEdit ? txn : {}), ...pasted, amount: parseFloat(amt), type, cat, note: note.trim(), date });
   };
 
   const dates = [0, 1].map((o) => { const d = new Date(); d.setDate(d.getDate() - o); return iso(d); });
@@ -1365,6 +1402,11 @@ function EntrySheet({ txn, onSave, onDelete, onClose }) {
           <span className="rupee">₹</span>{amt || "0"}
         </span>
         <span className="amounthint">{missing}</span>
+        {already && (
+          <span className="amountwarn">
+            Already logged on {shortDay(already.date)} as {already.note}
+          </span>
+        )}
       </div>
 
       <div className="metarow">
@@ -1393,7 +1435,7 @@ function EntrySheet({ txn, onSave, onDelete, onClose }) {
 
       <div style={{ padding: "0 16px 12px" }}>
         <input className="inp" placeholder="What was it for?" value={note}
-          onChange={(e) => setNote(e.target.value)}
+          onChange={(e) => setNote(e.target.value)} onPaste={pasteBank}
           onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
       </div>
 
@@ -1739,7 +1781,7 @@ export default function App() {
         )}
 
         {editing && (
-          <EntrySheet txn={editing} onSave={save}
+          <EntrySheet txn={editing} txns={txns} onSave={save}
             onDelete={remove} onClose={() => setEditing(null)} />
         )}
       </div>

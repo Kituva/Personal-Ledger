@@ -883,6 +883,15 @@ button {
   font-weight: 500;
   color: var(--text3);
 }
+/* A pasted bank message whose reference is already on an entry. Red, but
+   only a warning: ✓ still saves, for one payment split across two entries.
+   It sits under the hint so both can speak at once. */
+.amountwarn {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--neg);
+  text-align: center;
+}
 .amountval {
   font-size: 56px;
   font-weight: 700;
